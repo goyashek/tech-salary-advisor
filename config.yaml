@@ -1,0 +1,90 @@
+# Configuration for the salary model pipeline.
+# Paths are relative to the repo root.
+
+data:
+  path: data/salary_dataset_dirty.csv
+  target: Salary_INR
+
+# Skills parsed out of the raw "Skills" string into binary columns.
+skills:
+  - Python
+  - Java
+  - C++
+  - JavaScript
+  - Go
+  - SQL
+  - Spark
+  - AWS
+  - Docker
+  - Kubernetes
+  - PyTorch
+  - TensorFlow
+  - React
+  - System Design
+  - Agile
+
+# Columns the model treats as numeric / categorical.
+# Everything else (skill flags, missing-indicator flags) is passed through.
+numeric_features:
+  - Experience_Years
+  - skill_count
+categorical_features:
+  - Job_Title
+  - Location
+  - Education_Level
+
+split:
+  test_size: 0.2
+  random_state: 42
+
+# Cap the training target to the IQR fence to stop a few extreme
+# salaries from dragging the fit. Applied to train only.
+outlier_iqr_factor: 1.5
+
+# Optuna search budget. Tuning runs on a subset for speed; the winning
+# params are refit on the full training set.
+tuning:
+  n_trials: 15
+  cv_folds: 3
+  subset_size: 30000
+
+random_forest:
+  n_estimators: 200
+  max_depth: 12
+
+mlflow:
+  experiment: tech-salary-advisor
+  tracking_dir: mlruns
+
+output:
+  model: streamlit/models/salary_model.pkl
+  metadata: streamlit/models/metadata.pkl
+
+# Dropdown options surfaced by the Streamlit app.
+job_titles:
+  - Software Engineer
+  - Frontend Developer
+  - Backend Developer
+  - Full Stack Developer
+  - Data Scientist
+  - Machine Learning Engineer
+  - AI Researcher
+  - NLP Engineer
+  - Computer Vision Engineer
+  - Deep Learning Engineer
+  - DevOps Engineer
+  - Data Engineer
+  - QA Engineer
+  - Product Manager
+locations:
+  - Bangalore
+  - Mumbai
+  - Delhi NCR
+  - Noida
+  - Hyderabad
+  - Pune
+  - Chennai
+education_levels:
+  - Bachelor's
+  - Master's
+  - PhD
