@@ -2,7 +2,7 @@
 
 An end-to-end ML project that performs exploratory data analysis (EDA), implements preprocessing pipelines, compares multiple models, and deploys a Streamlit dashboard to predict technology compensation in India.
 
-**[🌐 Try the Live App](https://tech-salary-advisor.streamlit.app/)**
+**[Try the Live App](https://tech-salary-advisor.streamlit.app/)**
 
 ---
 
