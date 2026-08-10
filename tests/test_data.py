@@ -9,12 +9,14 @@ from src.data import (
     clean_job_title,
     clean_location,
 )
+from src.pipeline import build_preprocessor
 
 
 def test_title_mapping():
     assert clean_job_title(" DATA SCIENTIST ") == "Data Scientist"
     assert clean_job_title("ml engineer") == "Machine Learning Engineer"
     assert clean_job_title("something random") == "Software Engineer"  # fallback
+    assert pd.isna(clean_job_title(None))
 
 
 def test_location_and_education_mapping():
@@ -25,7 +27,7 @@ def test_location_and_education_mapping():
     assert clean_education("PhD") == "PhD"
 
 
-def test_clean_drops_missing_target_and_fills_features():
+def test_clean_drops_missing_target_but_keeps_learned_fields_missing():
     raw = pd.DataFrame(
         {
             "Job_Title": ["data scientist", "qa", "backend"],
@@ -38,9 +40,27 @@ def test_clean_drops_missing_target_and_fills_features():
     )
     out = clean(raw)
     assert len(out) == 2  # row with missing salary is gone
-    assert out.isnull().sum().sum() == 0  # everything imputed
     assert "Experience_Years_missing" in out.columns  # indicator flag added
     assert out.loc[1, "Experience_Years_missing"] == 1
+    assert pd.isna(out.loc[1, "Experience_Years"])
+    assert pd.isna(out.loc[1, "Education_Level"])
+    assert out.loc[1, "Skills"] == ""
+
+
+def test_preprocessor_learns_imputation_from_its_fit_data():
+    train = pd.DataFrame(
+        {
+            "Experience_Years": [1.0, np.nan, 5.0],
+            "Location": ["Pune", None, "Pune"],
+        }
+    )
+    preprocessor = build_preprocessor(["Experience_Years"], ["Location"])
+    preprocessor.fit(train)
+
+    numeric_imputer = preprocessor.named_transformers_["num"].named_steps["imputer"]
+    categorical_imputer = preprocessor.named_transformers_["cat"].named_steps["imputer"]
+    assert numeric_imputer.statistics_[0] == 3.0
+    assert categorical_imputer.statistics_[0] == "Pune"
 
 
 def test_cap_outliers_clips_tail():

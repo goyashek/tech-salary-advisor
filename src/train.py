@@ -2,10 +2,9 @@
 
 Run: python -m src.train  (add --fast for a quick smoke run)
 
-Steps: clean -> features -> split -> cap train outliers -> baselines ->
-Optuna tuning (XGBoost, CatBoost) -> stacking -> permutation importance ->
-pick the best by test R2 -> save pipeline + metadata. Everything is logged
-to a local MLflow store.
+Steps: deterministic clean -> split -> train-fitted preprocessing -> model
+comparison by cross-validation -> one final test evaluation -> export. Model
+comparison and final artifacts are logged to a local MLflow store.
 """
 import argparse
 import os
@@ -45,7 +44,7 @@ def _split(cfg):
         X, y, test_size=cfg["split"]["test_size"], random_state=cfg["split"]["random_state"]
     )
     y_train = cap_outliers_iqr(y_train, cfg["outlier_iqr_factor"])
-    median_exp = float(df["Experience_Years"].median())
+    median_exp = float(X_train["Experience_Years"].median())
     return X, X_train, X_test, y_train, y_test, median_exp
 
 
@@ -56,9 +55,16 @@ def _tune(build_model, space, X, y, num, cat, n_trials, cv):
         pipe = build_pipeline(model, num, cat)
         return cross_val_score(pipe, X, y, cv=cv, scoring="r2", n_jobs=1).mean()
 
-    study = optuna.create_study(direction="maximize")
+    study = optuna.create_study(
+        direction="maximize", sampler=optuna.samplers.TPESampler(seed=42)
+    )
     study.optimize(objective, n_trials=n_trials)
     return study.best_params, study.best_value
+
+
+def select_best(results):
+    """Return the candidate with the strongest cross-validation score."""
+    return max(results, key=lambda name: results[name]["cv_r2"])
 
 
 def main(config_path="config.yaml", fast=False):
@@ -74,20 +80,25 @@ def main(config_path="config.yaml", fast=False):
     n_feat = X.shape[1]
     print(f"train={X_train.shape} test={X_test.shape} features={n_feat}")
 
+    Xs = X_train.sample(n=min(subset, len(X_train)), random_state=42)
+    ys = y_train.loc[Xs.index]
+
     mlflow.set_tracking_uri(f"file:{ROOT / cfg['mlflow']['tracking_dir']}")
     mlflow.set_experiment(cfg["mlflow"]["experiment"])
 
     results = {}
 
     def record(name, pipe, extra=None):
-        pipe.fit(X_train, y_train)
-        m = regression_metrics(y_test, pipe.predict(X_test), n_features=n_feat)
-        results[name] = {"pipe": pipe, "metrics": m}
+        scores = cross_val_score(pipe, Xs, ys, cv=cv, scoring="r2", n_jobs=1)
+        results[name] = {
+            "pipe": pipe,
+            "cv_r2": float(scores.mean()),
+            "cv_r2_std": float(scores.std()),
+        }
         with mlflow.start_run(run_name=name):
             mlflow.log_params(extra or {})
-            mlflow.log_metrics(m)
-        print(f"{name:16} R2={m['r2']:.4f}  MAE={m['mae']:,.0f}  MAPE={m['mape']:.3f}")
-        return m
+            mlflow.log_metrics({"cv_r2": float(scores.mean()), "cv_r2_std": float(scores.std())})
+        print(f"{name:16} CV R2={scores.mean():.4f} +/- {scores.std():.4f}")
 
     # --- Baselines ---
     # alpha is small because the target is log-scaled (see build_pipeline).
@@ -101,10 +112,7 @@ def main(config_path="config.yaml", fast=False):
     record("xgboost", build_pipeline(XGBRegressor(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=42, n_jobs=-1), num, cat))
     record("catboost", build_pipeline(CatBoostRegressor(iterations=300, depth=6, learning_rate=0.05, random_seed=42, verbose=False, allow_writing_files=False), num, cat))
 
-    # --- Optuna tuning on a subset (refit best on full train) ---
-    Xs = X_train.sample(n=min(subset, len(X_train)), random_state=42)
-    ys = y_train.loc[Xs.index]
-
+    # --- Optuna tuning on the same training-only subset ---
     xgb_space = {
         "n_estimators": lambda t: t.suggest_int("n_estimators", 100, 300, step=50),
         "max_depth": lambda t: t.suggest_int("max_depth", 4, 8),
@@ -138,14 +146,22 @@ def main(config_path="config.yaml", fast=False):
     stack = StackingRegressor(estimators=base, final_estimator=RidgeCV(), cv=cv, n_jobs=1)
     record("stacking", TransformedTargetRegressor(regressor=stack, func=np.log1p, inverse_func=np.expm1))
 
-    # --- Pick the winner ---
-    best_name = max(results, key=lambda k: results[k]["metrics"]["r2"])
+    # --- Pick by CV, then touch the test set once ---
+    best_name = select_best(results)
     best = results[best_name]
-    print(f"\nWINNER: {best_name}  R2={best['metrics']['r2']:.4f}  MAE={best['metrics']['mae']:,.0f}")
+    best["pipe"].fit(X_train, y_train)
+    best["metrics"] = regression_metrics(
+        y_test, best["pipe"].predict(X_test), n_features=n_feat
+    )
+    print(
+        f"\nWINNER BY CV: {best_name}  CV R2={best['cv_r2']:.4f}\n"
+        f"FINAL TEST: R2={best['metrics']['r2']:.4f}  MAE={best['metrics']['mae']:,.0f}"
+    )
 
     # --- Permutation importance on the winner ---
+    # ponytail: one process avoids semaphore failures; parallelize if this becomes slow.
     perm = permutation_importance(
-        best["pipe"], X_test, y_test, n_repeats=3 if fast else 5, random_state=42, n_jobs=-1
+        best["pipe"], X_test, y_test, n_repeats=3 if fast else 5, random_state=42, n_jobs=1
     )
     top = sorted(zip(X.columns, perm.importances_mean), key=lambda kv: kv[1], reverse=True)[:10]
     print("top features:", [f"{c} ({v:.3f})" for c, v in top])
@@ -160,14 +176,30 @@ def main(config_path="config.yaml", fast=False):
         "rmse": float(best["metrics"]["rmse"]),
         "r2": float(best["metrics"]["r2"]),
         "mape": float(best["metrics"]["mape"]),
+        "selection_cv_r2": float(best["cv_r2"]),
+        "cv_results": {
+            name: {"mean": result["cv_r2"], "std": result["cv_r2_std"]}
+            for name, result in results.items()
+        },
+        "dataset_rows": len(X),
+        "training_rows": len(X_train),
+        "test_rows": len(X_test),
         "job_titles": cfg["job_titles"],
         "locations": cfg["locations"],
         "education_levels": cfg["education_levels"],
     }
-    for key in ("model", "metadata"):
-        Path(ROOT / cfg["output"][key]).parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(best["pipe"], ROOT / cfg["output"]["model"])
-    joblib.dump(metadata, ROOT / cfg["output"]["metadata"])
+    model_path = ROOT / cfg["output"]["model"]
+    metadata_path = ROOT / cfg["output"]["metadata"]
+    for path in (model_path, metadata_path):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(best["pipe"], model_path)
+    joblib.dump(metadata, metadata_path)
+    with mlflow.start_run(run_name=f"{best_name}_final"):
+        mlflow.log_param("selected_model", best_name)
+        mlflow.log_metric("selection_cv_r2", best["cv_r2"])
+        mlflow.log_metrics({f"test_{key}": value for key, value in best["metrics"].items()})
+        mlflow.log_artifact(str(model_path), artifact_path="model")
+        mlflow.log_artifact(str(metadata_path), artifact_path="model")
     print(f"saved {cfg['output']['model']} and {cfg['output']['metadata']}")
     return results, metadata
 

@@ -1,10 +1,13 @@
-.PHONY: install test train train-fast app mlflow lint clean
+.PHONY: install install-dev test train train-fast app mlflow clean
 
 install:
 	pip install -r requirements.txt
 
+install-dev:
+	pip install -r requirements-dev.txt
+
 test:
-	pytest -q
+	python -m pytest -q
 
 # Full training run: tunes, compares, and exports the best model.
 train:
