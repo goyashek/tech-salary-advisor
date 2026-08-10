@@ -1,8 +1,8 @@
-import os
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
+
+from src.inference import load_model_assets, predict_salary_inr
 
 st.set_page_config(
     page_title="Tech Salary Predictor (India)",
@@ -10,15 +10,9 @@ st.set_page_config(
     layout="centered"
 )
 
-@st.cache_resource
-def load_model_assets():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    model = joblib.load(os.path.join(current_dir, "models/salary_model.pkl"))
-    metadata = joblib.load(os.path.join(current_dir, "models/metadata.pkl"))
-    return model, metadata
-
 try:
-    model, metadata = load_model_assets()
+    assets = load_model_assets()
+    _, metadata = assets
     mae_lpa = metadata['mae'] / 100000
 except Exception as e:
     st.error(f"Could not load the model assets. Run `python -m src.train` first. Error: {e}")
@@ -37,31 +31,12 @@ education = st.selectbox("Education Level", metadata['education_levels'])
 location = st.selectbox("Location / City", metadata['locations'])
 selected_skills = st.multiselect("Your Technical Skills", metadata['all_skills'], default=['Python', 'SQL'])
 
-def predict_salary_inr(exp, title, edu, loc, skills):
-    input_data = {
-        'Experience_Years': exp,
-        'Job_Title': title,
-        'Location': loc,
-        'Education_Level': edu,
-        'skill_count': len(skills),
-        # The user fills every field, so nothing is missing at prediction time.
-        'Job_Title_missing': 0,
-        'Experience_Years_missing': 0,
-        'Education_Level_missing': 0,
-        'Location_missing': 0,
-        'Skills_missing': 0,
-    }
-
-    for skill in metadata['all_skills']:
-        input_data[skill] = 1 if skill in skills else 0
-
-    input_df = pd.DataFrame([input_data])[metadata['feature_columns']]
-    return float(model.predict(input_df)[0])
-
 st.write("")
 
 if st.button("Predict Salary"):
-    prediction = predict_salary_inr(years_exp, job_title, education, location, selected_skills)
+    prediction = predict_salary_inr(
+        job_title, years_exp, education, location, selected_skills, assets
+    )
     lpa = prediction / 100000
     mae_lpa = metadata['mae'] / 100000
     
@@ -76,7 +51,7 @@ if st.button("Predict Salary"):
     exp_range = np.arange(0, 21.0, 1.0)
     salary_growth = []
     for e in exp_range:
-        pred_e = predict_salary_inr(e, job_title, education, location, selected_skills)
+        pred_e = predict_salary_inr(job_title, e, education, location, selected_skills, assets)
         salary_growth.append(pred_e / 100000) # Convert to LPA
         
     chart_data = pd.DataFrame({
@@ -93,7 +68,9 @@ if st.button("Predict Salary"):
         bumps = []
         for skill in missing_skills:
             test_skills = selected_skills + [skill]
-            new_pred = predict_salary_inr(years_exp, job_title, education, location, test_skills)
+            new_pred = predict_salary_inr(
+                job_title, years_exp, education, location, test_skills, assets
+            )
             bump = new_pred - prediction
             if bump > 1000:
                 bumps.append((skill, bump))
