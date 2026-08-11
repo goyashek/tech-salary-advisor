@@ -1,4 +1,5 @@
 """Checks for skill parsing and feature construction."""
+
 import pandas as pd
 
 from src.features import add_skill_count, add_skill_flags, build_features

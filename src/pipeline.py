@@ -5,6 +5,7 @@ skill / missing-indicator columns pass through untouched. Salary is
 right-skewed, so we fit on log1p(salary) and invert on predict via
 TransformedTargetRegressor.
 """
+
 import numpy as np
 from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
 from sklearn.impute import SimpleImputer
@@ -38,7 +39,10 @@ def make_estimator(model, numeric_features, categorical_features):
     """Preprocessor + model, without target transform (used as a stacking base)."""
     return Pipeline(
         [
-            ("preprocessor", build_preprocessor(numeric_features, categorical_features)),
+            (
+                "preprocessor",
+                build_preprocessor(numeric_features, categorical_features),
+            ),
             ("model", model),
         ]
     )
@@ -47,4 +51,6 @@ def make_estimator(model, numeric_features, categorical_features):
 def build_pipeline(model, numeric_features, categorical_features):
     """Fit on log1p(salary) and invert the transform during prediction."""
     estimator = make_estimator(model, numeric_features, categorical_features)
-    return TransformedTargetRegressor(regressor=estimator, func=np.log1p, inverse_func=np.expm1)
+    return TransformedTargetRegressor(
+        regressor=estimator, func=np.log1p, inverse_func=np.expm1
+    )

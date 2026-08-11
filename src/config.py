@@ -1,4 +1,5 @@
 """Load the YAML config as a plain dict."""
+
 from pathlib import Path
 
 import yaml

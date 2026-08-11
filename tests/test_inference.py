@@ -7,9 +7,17 @@ def metadata():
     skills = ["Python", "SQL", "Docker"]
     return {
         "feature_columns": [
-            "Job_Title", "Experience_Years", "Education_Level", "Location",
-            "Job_Title_missing", "Experience_Years_missing", "Education_Level_missing",
-            "Location_missing", "Skills_missing", *skills, "skill_count",
+            "Job_Title",
+            "Experience_Years",
+            "Education_Level",
+            "Location",
+            "Job_Title_missing",
+            "Experience_Years_missing",
+            "Education_Level_missing",
+            "Location_missing",
+            "Skills_missing",
+            *skills,
+            "skill_count",
         ],
         "all_skills": skills,
         "job_titles": ["Software Engineer", "Data Scientist"],
@@ -20,7 +28,12 @@ def metadata():
 
 def test_build_feature_row_canonicalizes_and_orders_columns():
     row = build_feature_row(
-        " data scientist ", 3, "btech", " noida ", ["python", "SQL", "python"], metadata()
+        " data scientist ",
+        3,
+        "btech",
+        " noida ",
+        ["python", "SQL", "python"],
+        metadata(),
     )
 
     assert list(row.columns) == metadata()["feature_columns"]
@@ -34,7 +47,9 @@ def test_build_feature_row_canonicalizes_and_orders_columns():
 
 def test_build_feature_row_rejects_unknown_skill():
     try:
-        build_feature_row("Data Scientist", 3, "Bachelor's", "Noida", ["Rust"], metadata())
+        build_feature_row(
+            "Data Scientist", 3, "Bachelor's", "Noida", ["Rust"], metadata()
+        )
     except ValueError as exc:
         assert "unsupported skill" in str(exc)
     else:

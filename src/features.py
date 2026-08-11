@@ -15,8 +15,10 @@ def add_skill_flags(df, skills):
 
 def add_skill_count(df):
     df = df.copy()
-    df["skill_count"] = df["Skills"].astype(str).apply(
-        lambda x: len([part for part in x.split(",") if part.strip()])
+    df["skill_count"] = (
+        df["Skills"]
+        .astype(str)
+        .apply(lambda x: len([part for part in x.split(",") if part.strip()]))
     )
     return df
 

@@ -6,6 +6,7 @@ Steps: deterministic clean -> split -> train-fitted preprocessing -> model
 comparison by cross-validation -> one final test evaluation -> export. Model
 comparison and final artifacts are logged to a local MLflow store.
 """
+
 import argparse
 import os
 import warnings
@@ -41,7 +42,10 @@ def _split(cfg):
     y = df[cfg["data"]["target"]]
     X = df.drop(columns=[cfg["data"]["target"]])
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=cfg["split"]["test_size"], random_state=cfg["split"]["random_state"]
+        X,
+        y,
+        test_size=cfg["split"]["test_size"],
+        random_state=cfg["split"]["random_state"],
     )
     y_train = cap_outliers_iqr(y_train, cfg["outlier_iqr_factor"])
     median_exp = float(X_train["Experience_Years"].median())
@@ -50,6 +54,7 @@ def _split(cfg):
 
 def _tune(build_model, space, X, y, num, cat, n_trials, cv):
     """Optuna Bayesian search over `space`, scoring cross-validated R2."""
+
     def objective(trial):
         model = build_model({k: fn(trial) for k, fn in space.items()})
         pipe = build_pipeline(model, num, cat)
@@ -97,54 +102,148 @@ def main(config_path="config.yaml", fast=False):
         }
         with mlflow.start_run(run_name=name):
             mlflow.log_params(extra or {})
-            mlflow.log_metrics({"cv_r2": float(scores.mean()), "cv_r2_std": float(scores.std())})
+            mlflow.log_metrics(
+                {"cv_r2": float(scores.mean()), "cv_r2_std": float(scores.std())}
+            )
         print(f"{name:16} CV R2={scores.mean():.4f} +/- {scores.std():.4f}")
 
     # --- Baselines ---
     # alpha is small because the target is log-scaled (see build_pipeline).
-    record("elasticnet", build_pipeline(ElasticNet(alpha=0.01, l1_ratio=0.5, random_state=42), num, cat))
+    record(
+        "elasticnet",
+        build_pipeline(ElasticNet(alpha=0.01, l1_ratio=0.5, random_state=42), num, cat),
+    )
     rf = RandomForestRegressor(
         n_estimators=cfg["random_forest"]["n_estimators"],
         max_depth=cfg["random_forest"]["max_depth"],
-        oob_score=True, random_state=42, n_jobs=-1,
+        oob_score=True,
+        random_state=42,
+        n_jobs=-1,
     )
     record("random_forest", build_pipeline(rf, num, cat))
-    record("xgboost", build_pipeline(XGBRegressor(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=42, n_jobs=-1), num, cat))
-    record("catboost", build_pipeline(CatBoostRegressor(iterations=300, depth=6, learning_rate=0.05, random_seed=42, verbose=False, allow_writing_files=False), num, cat))
+    record(
+        "xgboost",
+        build_pipeline(
+            XGBRegressor(
+                n_estimators=100,
+                max_depth=5,
+                learning_rate=0.1,
+                random_state=42,
+                n_jobs=-1,
+            ),
+            num,
+            cat,
+        ),
+    )
+    record(
+        "catboost",
+        build_pipeline(
+            CatBoostRegressor(
+                iterations=300,
+                depth=6,
+                learning_rate=0.05,
+                random_seed=42,
+                verbose=False,
+                allow_writing_files=False,
+            ),
+            num,
+            cat,
+        ),
+    )
 
     # --- Optuna tuning on the same training-only subset ---
     xgb_space = {
         "n_estimators": lambda t: t.suggest_int("n_estimators", 100, 300, step=50),
         "max_depth": lambda t: t.suggest_int("max_depth", 4, 8),
-        "learning_rate": lambda t: t.suggest_float("learning_rate", 0.03, 0.2, log=True),
+        "learning_rate": lambda t: t.suggest_float(
+            "learning_rate", 0.03, 0.2, log=True
+        ),
         "subsample": lambda t: t.suggest_float("subsample", 0.7, 1.0),
         "colsample_bytree": lambda t: t.suggest_float("colsample_bytree", 0.7, 1.0),
     }
     xgb_params, xgb_cv = _tune(
-        lambda p: XGBRegressor(random_state=42, n_jobs=-1, **p), xgb_space, Xs, ys, num, cat, n_trials, cv
+        lambda p: XGBRegressor(random_state=42, n_jobs=-1, **p),
+        xgb_space,
+        Xs,
+        ys,
+        num,
+        cat,
+        n_trials,
+        cv,
     )
     print(f"best xgb (cv R2={xgb_cv:.4f}): {xgb_params}")
-    record("xgboost_tuned", build_pipeline(XGBRegressor(random_state=42, n_jobs=-1, **xgb_params), num, cat), xgb_params)
+    record(
+        "xgboost_tuned",
+        build_pipeline(
+            XGBRegressor(random_state=42, n_jobs=-1, **xgb_params), num, cat
+        ),
+        xgb_params,
+    )
 
     cb_space = {
         "iterations": lambda t: t.suggest_int("iterations", 300, 700, step=100),
         "depth": lambda t: t.suggest_int("depth", 4, 8),
-        "learning_rate": lambda t: t.suggest_float("learning_rate", 0.03, 0.15, log=True),
+        "learning_rate": lambda t: t.suggest_float(
+            "learning_rate", 0.03, 0.15, log=True
+        ),
         "l2_leaf_reg": lambda t: t.suggest_float("l2_leaf_reg", 1.0, 6.0),
     }
     cb_params, cb_cv = _tune(
-        lambda p: CatBoostRegressor(random_seed=42, verbose=False, **p, allow_writing_files=False), cb_space, Xs, ys, num, cat, n_trials, cv
+        lambda p: CatBoostRegressor(
+            random_seed=42, verbose=False, **p, allow_writing_files=False
+        ),
+        cb_space,
+        Xs,
+        ys,
+        num,
+        cat,
+        n_trials,
+        cv,
     )
     print(f"best catboost (cv R2={cb_cv:.4f}): {cb_params}")
-    record("catboost_tuned", build_pipeline(CatBoostRegressor(random_seed=42, verbose=False, **cb_params, allow_writing_files=False), num, cat), cb_params)
+    record(
+        "catboost_tuned",
+        build_pipeline(
+            CatBoostRegressor(
+                random_seed=42, verbose=False, **cb_params, allow_writing_files=False
+            ),
+            num,
+            cat,
+        ),
+        cb_params,
+    )
 
     # --- Stacking the two tuned learners ---
     base = [
-        ("xgb", make_estimator(XGBRegressor(random_state=42, n_jobs=-1, **xgb_params), num, cat)),
-        ("cb", make_estimator(CatBoostRegressor(random_seed=42, verbose=False, **cb_params, allow_writing_files=False), num, cat)),
+        (
+            "xgb",
+            make_estimator(
+                XGBRegressor(random_state=42, n_jobs=-1, **xgb_params), num, cat
+            ),
+        ),
+        (
+            "cb",
+            make_estimator(
+                CatBoostRegressor(
+                    random_seed=42,
+                    verbose=False,
+                    **cb_params,
+                    allow_writing_files=False,
+                ),
+                num,
+                cat,
+            ),
+        ),
     ]
-    stack = StackingRegressor(estimators=base, final_estimator=RidgeCV(), cv=cv, n_jobs=1)
-    record("stacking", TransformedTargetRegressor(regressor=stack, func=np.log1p, inverse_func=np.expm1))
+    stack = StackingRegressor(
+        estimators=base, final_estimator=RidgeCV(), cv=cv, n_jobs=1
+    )
+    record(
+        "stacking",
+        TransformedTargetRegressor(
+            regressor=stack, func=np.log1p, inverse_func=np.expm1
+        ),
+    )
 
     # --- Pick by CV, then touch the test set once ---
     best_name = select_best(results)
@@ -161,9 +260,16 @@ def main(config_path="config.yaml", fast=False):
     # --- Permutation importance on the winner ---
     # ponytail: one process avoids semaphore failures; parallelize if this becomes slow.
     perm = permutation_importance(
-        best["pipe"], X_test, y_test, n_repeats=3 if fast else 5, random_state=42, n_jobs=1
+        best["pipe"],
+        X_test,
+        y_test,
+        n_repeats=3 if fast else 5,
+        random_state=42,
+        n_jobs=1,
     )
-    top = sorted(zip(X.columns, perm.importances_mean), key=lambda kv: kv[1], reverse=True)[:10]
+    top = sorted(
+        zip(X.columns, perm.importances_mean), key=lambda kv: kv[1], reverse=True
+    )[:10]
     print("top features:", [f"{c} ({v:.3f})" for c, v in top])
 
     # --- Export ---
@@ -197,7 +303,9 @@ def main(config_path="config.yaml", fast=False):
     with mlflow.start_run(run_name=f"{best_name}_final"):
         mlflow.log_param("selected_model", best_name)
         mlflow.log_metric("selection_cv_r2", best["cv_r2"])
-        mlflow.log_metrics({f"test_{key}": value for key, value in best["metrics"].items()})
+        mlflow.log_metrics(
+            {f"test_{key}": value for key, value in best["metrics"].items()}
+        )
         mlflow.log_artifact(str(model_path), artifact_path="model")
         mlflow.log_artifact(str(metadata_path), artifact_path="model")
     print(f"saved {cfg['output']['model']} and {cfg['output']['metadata']}")
@@ -207,6 +315,8 @@ def main(config_path="config.yaml", fast=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config.yaml")
-    parser.add_argument("--fast", action="store_true", help="tiny run for smoke testing")
+    parser.add_argument(
+        "--fast", action="store_true", help="tiny run for smoke testing"
+    )
     args = parser.parse_args()
     main(args.config, fast=args.fast)

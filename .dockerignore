@@ -1,0 +1,13 @@
+.git/
+.github/
+mlruns/
+catboost_info/
+data/
+notebooks/
+tests/
+__pycache__/
+.pytest_cache/
+.venv/
+.DS_Store
+requirements-dev.txt
+streamlit/app.py

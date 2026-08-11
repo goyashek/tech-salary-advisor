@@ -4,10 +4,17 @@ The raw file has mixed casing, stray spaces, synonym job titles, and missing
 values. This module handles deterministic cleanup; learned imputation stays in
 the sklearn pipeline.
 """
+
 import pandas as pd
 
 # Record whether each input was reported before the pipeline imputes it.
-IMPUTED_COLUMNS = ["Job_Title", "Experience_Years", "Education_Level", "Location", "Skills"]
+IMPUTED_COLUMNS = [
+    "Job_Title",
+    "Experience_Years",
+    "Education_Level",
+    "Location",
+    "Skills",
+]
 
 
 def load_raw(path):

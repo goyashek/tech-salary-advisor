@@ -1,4 +1,5 @@
 """Load the exported model and turn a career profile into one prediction row."""
+
 from functools import lru_cache
 from pathlib import Path
 
@@ -14,8 +15,14 @@ from src.data import clean_education, clean_job_title, clean_location
 def load_model_assets(model_path=None, metadata_path=None):
     """Load model assets once per process."""
     cfg = load_config()
-    model_path = ROOT / cfg["output"]["model"] if model_path is None else Path(model_path)
-    metadata_path = ROOT / cfg["output"]["metadata"] if metadata_path is None else Path(metadata_path)
+    model_path = (
+        ROOT / cfg["output"]["model"] if model_path is None else Path(model_path)
+    )
+    metadata_path = (
+        ROOT / cfg["output"]["metadata"]
+        if metadata_path is None
+        else Path(metadata_path)
+    )
     return joblib.load(model_path), joblib.load(metadata_path)
 
 
@@ -51,8 +58,12 @@ def build_feature_row(job_title, experience, education, location, skills, metada
     if not np.isfinite(experience) or experience < 0:
         raise ValueError("experience must be a finite, non-negative number")
 
-    job_title = _category(job_title, clean_job_title, metadata["job_titles"], "job title")
-    education = _category(education, clean_education, metadata["education_levels"], "education")
+    job_title = _category(
+        job_title, clean_job_title, metadata["job_titles"], "job title"
+    )
+    education = _category(
+        education, clean_education, metadata["education_levels"], "education"
+    )
     location = _category(location, clean_location, metadata["locations"], "location")
     skills = _skills(skills, metadata["all_skills"])
 
@@ -75,5 +86,7 @@ def build_feature_row(job_title, experience, education, location, skills, metada
 def predict_salary_inr(job_title, experience, education, location, skills, assets=None):
     """Return the raw salary estimate in INR for one career profile."""
     model, metadata = assets or load_model_assets()
-    row = build_feature_row(job_title, experience, education, location, skills, metadata)
+    row = build_feature_row(
+        job_title, experience, education, location, skills, metadata
+    )
     return float(model.predict(row)[0])
