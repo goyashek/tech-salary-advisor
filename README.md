@@ -37,6 +37,10 @@
 - **Held-out R²:** 0.8849
 - **Held-out MAE:** ₹155,014
 
+## 🎥 Demo
+
+https://github.com/user-attachments/assets/6d0e09a7-e7c3-4c38-8589-7d68b8e18c0d
+
 ## 📌 Overview
 
 This is an end-to-end salary estimation system built around a public Indian technology salary dataset. The final system includes both the modeling work and the engineering required to make the model reproducible, inspectable, and accessible through multiple interfaces.
