@@ -1,8 +1,8 @@
 <div align="center">
 
-# 💼 Tech Salary Predictor (India)
+# 💼 Tech Salary Advisor
 
-### Predicting Indian tech salaries with a tuned, stacked regression pipeline
+### Explainable salary estimation with a reproducible ML pipeline
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-Pipeline-F7931E?logo=scikitlearn&logoColor=white)
@@ -10,6 +10,7 @@
 ![CatBoost](https://img.shields.io/badge/CatBoost-tuned-FFCC00)
 ![MLflow](https://img.shields.io/badge/MLflow-tracking-0194E2?logo=mlflow&logoColor=white)
 [![Live Demo](https://img.shields.io/badge/Streamlit-Live%20Demo-FF4B4B?logo=streamlit&logoColor=white)](https://tech-salary-advisor.streamlit.app/)
+[![CI](https://github.com/goyashek/Tech-Salary-Advisor/actions/workflows/ci.yml/badge.svg)](https://github.com/goyashek/Tech-Salary-Advisor/actions/workflows/ci.yml)
 
 ![Best Model](https://img.shields.io/badge/Best%20Model-Stacking%20(XGB%2BCatBoost)-success)
 ![R2](https://img.shields.io/badge/Held--out%20R²-0.885-blue)
@@ -22,203 +23,299 @@
 
 ## At a glance
 
-[🚀 Try the live app](https://tech-salary-advisor.streamlit.app/)
-· [📓 EDA notebook](notebooks/EDA.ipynb)
-· [📓 Modeling notebook](notebooks/Salary_Prediction.ipynb)
+| Area | What this project demonstrates |
+|---|---|
+| Modeling | Regression, log-target transformation, Optuna, and stacking |
+| Evaluation | Training-only cross-validation and untouched held-out testing |
+| Explainability | Permutation importance and counterfactual profile comparisons |
+| Serving | Streamlit UI and typed FastAPI API |
+| MLOps | MLflow artifacts, Docker runtime, CI, tests, and pinned API dependencies |
 
-- **Task:** Estimate annual salary (INR) for common Indian tech roles from experience, education, location, and skills.
-- **Best model:** a stacking ensemble selected using cross-validation on the training split.
-- **Held-out result:** R² **0.8849**, MAE **₹1.55 LPA** on a 21,547-row test split.
-- **Main finding:** experience, role, and education explain most of the variation; individual skill flags add very little once those are known.
+- **Task:** Estimate annual salary in INR from role, experience, education, location, and skills.
+- **Dataset:** Approximately 110,000 public salary records; 107,735 remained after removing rows without a target.
+- **Best model:** XGBoost + CatBoost stacking ensemble selected by training-only cross-validation.
+- **Held-out R²:** 0.8849
+- **Held-out MAE:** ₹155,014
 
 ## 📌 Overview
 
-An end-to-end machine learning project for salary estimation across common technology roles in India.
-It covers data exploration, feature engineering, model comparison, MLflow tracking, and a Streamlit
-app.
+This is an end-to-end salary estimation system built around a public Indian technology salary dataset. The final system includes both the modeling work and the engineering required to make the model reproducible, inspectable, and accessible through multiple interfaces.
 
-The `src/` package contains the cleaning, feature, pipeline, evaluation, and training code used by the
-notebooks. Run the seeded training flow with `python -m src.train`.
+I built it as a learning progression: understand the data first, make the evaluation trustworthy, compare models deliberately, inspect what the model relies on, and then connect the exported artifact to a real application and API.
 
-The project uses the [Indian Tech Salaries](https://www.kaggle.com/datasets/ashishprajapati223/indian-tech-salaries/data)
-dataset from Kaggle (~110k rows). The file contains inconsistent text labels and missing values, which
-are handled in the shared training pipeline.
+The model produces estimates from patterns in the project dataset. It is not an authoritative market-rate system and should not be treated as a compensation benchmark.
 
----
+## 🧭 Project journey
 
-## 📊 Model results
+The project did not begin as a polished application. It started with a dirty salary file and a simple modeling goal.
 
-Models were compared with three-fold cross-validation on a fixed 30,000-row subset of the training
-data. The 21,547-row test split stayed untouched until stacking had the strongest mean CV R².
+The early work focused on understanding the dataset: which columns were incomplete, how salary was distributed, how inconsistent labels should be standardized, and whether skills added useful signal after role and experience were known.
 
-| Model | Mean CV R² | Std. dev. |
-|-------|:----------:|:---------:|
-| ElasticNet | 0.7745 | 0.0022 |
-| Random Forest | 0.8248 | 0.0013 |
-| XGBoost | 0.8771 | 0.0021 |
-| CatBoost | 0.8829 | 0.0021 |
-| Tuned XGBoost (Optuna) | 0.8808 | 0.0015 |
-| Tuned CatBoost (Optuna) | 0.8838 | 0.0020 |
-| **Stacking (selected)** | **0.8838** | **0.0020** |
+Once the baseline pipeline worked, I moved toward model selection. Instead of choosing a model from the test set, I used cross-validation on the training data, tuned the strongest boosting models with Optuna, and evaluated the selected stack once on the untouched test split.
 
-After selection, stacking was fitted on all 86,188 training rows and evaluated once on the held-out
-test set: R² **0.8849**, MAE **₹155,014**, RMSE **₹207,766**, and MAPE **10.31%**.
+The final engineering work connected the trained artifact to Streamlit and FastAPI through one shared inference path, then added Docker, tests, linting, and GitHub Actions.
 
-> These are results from one seeded training run. Variation across seeds has not been measured.
+The commit history reflects that progression:
 
-### What drives the prediction
-
-Permutation importance on the held-out split ranks the features clearly:
-
-| Feature | Relative importance |
-|---|---|
-| Experience_Years | highest |
-| Job_Title | high |
-| Education_Level | moderate |
-| Location | moderate |
-| Individual skills / skill_count | marginal |
-
-Experience and role dominate. This is why the app's "skill bump" suggestions move the estimate only a
-little: in this data, the skill flags carry far less signal than the career basics.
-
----
-
-## 🧠 Key decisions (and the reasoning)
-
-Each choice below is driven by what the data showed in [`EDA.ipynb`](notebooks/EDA.ipynb), and is
-implemented once in `src/` so training and the notebooks stay in sync.
-
-- **Drop rows with no salary, impute the rest.** 2,265 rows have no target and are dropped. Missing
-  indicators are added before splitting. Median and most-frequent imputers are fitted inside the
-  sklearn pipeline, so each CV fold learns them from its own training rows.
-- **Log-transform the target.** Salary is right-skewed (skew 0.85); `log1p` pulls it to near-symmetric
-  (skew −0.27). Training on the log target and inverting on predict (`TransformedTargetRegressor`)
-  stabilises the fit and stops the high-salary tail from dominating the error.
-- **Cap training outliers.** About 2% of salaries sit past the 1.5×IQR fence. The training target is
-  clipped to that fence; the test split is left untouched so evaluation stays honest.
-- **Standardize messy text.** `noida`, `Noida`, and `NOIDA` collapse to one city; `btech`, `B.Tech`,
-  and `bachelors` collapse to one degree. Synonym job titles map to a fixed set.
-- **Engineer `skill_count` and skill flags.** The comma-separated `Skills` string becomes one binary
-  column per known skill plus a count of listed skills.
-- **Tune, then stack.** XGBoost and CatBoost are tuned with Optuna, then stacked with a ridge
-  meta-model. Candidate CV scores, final test metrics, and exported artifacts are logged to MLflow.
-
----
-
-## 🗂️ Notebooks
-
-| Notebook | What it covers |
-|----------|----------------|
-| [`EDA.ipynb`](notebooks/EDA.ipynb) | Loads the raw data and works through each cleaning decision: missing values, the salary skew that motivates the log transform, the IQR outlier check, text standardization, and what actually drives salary. |
-| [`Salary_Prediction.ipynb`](notebooks/Salary_Prediction.ipynb) | Reproduces the cleaning and features from `src/`, builds the pipeline, compares the baselines, and points to `python -m src.train` for the full Optuna + stacking run. Loads the exported model to show the deployed metrics. |
-
-Both import from `src/`, so the notebooks and the shipped model use identical logic.
-
----
-
-## 🏗️ Pipeline
-
-```mermaid
-flowchart LR
-    A[Kaggle CSV<br/>~110k rows] --> B[deterministic clean<br/>drop missing target · flags · standardize]
-    B --> C[features<br/>skill flags · skill_count]
-    C --> D[train/test split]
-    D --> E[ColumnTransformer<br/>impute · scale · one-hot]
-    E --> F[CV comparison<br/>Optuna · stacking]
-    F --> G[one final test evaluation]
-    G --> H[MLflow + export<br/>salary_model.pkl]
-    H --> I[Streamlit app<br/>estimate · growth curve · skill comparison]
+```text
+dataset and scaffold
+        ↓
+EDA, cleaning, and feature engineering
+        ↓
+preprocessing pipeline and baseline models
+        ↓
+Optuna tuning, stacking, and feature importance
+        ↓
+model export and Streamlit app
+        ↓
+tests, documentation, and methodology cleanup
+        ↓
+shared inference, FastAPI, Docker, and CI
 ```
 
----
+## 📊 Data and task framing
+
+The model predicts `Salary_INR`, an annual salary value in Indian rupees. The input fields are:
+
+- Job title
+- Years of experience
+- Education level
+- Location
+- Technical skills
+
+| Property | Details |
+|---|---|
+| Source | [Indian Tech Salaries](https://www.kaggle.com/datasets/ashishprajapati223/indian-tech-salaries/data) on Kaggle |
+| Raw size | Approximately 110,000 rows |
+| Usable rows | 107,735 after dropping missing salary targets |
+| Target | `Salary_INR` |
+| Features | `Job_Title`, `Experience_Years`, `Education_Level`, `Location`, and `Skills` |
+
+This is a supervised regression problem, not a salary-market benchmark. The dataset provides examples of salary patterns across roles, cities, education levels, experience, and listed skills. It does not contain every factor that affects compensation, such as company, industry, negotiation, equity, employment gaps, or current market conditions.
+
+## 🧹 Why these preprocessing decisions?
+
+- **Drop missing targets:** supervised learning cannot use rows without a known salary.
+- **Standardize text deterministically:** casing, spacing, and known synonyms should not create artificial categories.
+- **Keep missing indicators:** a missing field may itself carry information.
+- **Impute inside the pipeline:** medians and most-frequent categories are learned separately inside each training fold.
+- **Cap only training targets:** extreme salary values are clipped using a training-derived IQR fence; the test target remains untouched.
+- **Expand skills into flags:** the comma-separated skill field becomes binary skill columns plus `skill_count`.
+
+The important distinction was between transformations that can be applied safely before splitting and statistics that must be learned after splitting. Whitespace cleanup, casing normalization, and known synonym mapping are deterministic. Imputation is learned from data, so it belongs inside the sklearn pipeline.
+
+## 🧠 Model progression and advanced techniques
+
+The model progression was deliberately incremental:
+
+1. **ElasticNet** as a simple linear baseline.
+2. **Random Forest** as a nonlinear tree ensemble.
+3. **XGBoost and CatBoost** as stronger boosting candidates.
+4. **Optuna tuning** for XGBoost and CatBoost using a seeded TPE search.
+5. **RidgeCV stacking** to combine the two tuned learners.
+
+Several techniques were used because they addressed specific properties of the problem:
+
+- `log1p` target transformation for the right-skewed salary distribution.
+- `TransformedTargetRegressor` to keep the target transformation attached to the estimator.
+- Median and most-frequent imputation inside sklearn pipelines.
+- One-hot encoding for categorical profile fields.
+- CatBoost and XGBoost for nonlinear interactions between career variables.
+- Training-only IQR target capping to reduce the influence of extreme salary values.
+- Seeded Optuna tuning and fixed train/test splits for reproducibility.
+- RidgeCV as the stacking meta-model.
+
+The final modeling path is:
+
+```text
+profile features
+      ↓
+train-fitted preprocessing
+      ↓
+tuned XGBoost ─┐
+                ├── RidgeCV stacking model
+tuned CatBoost ┘
+      ↓
+salary estimate in INR
+```
+
+## 🔍 Explainability and xAI
+
+The project uses lightweight, model-agnostic explainability rather than treating the prediction as a black box.
+
+Permutation importance on the held-out split shows that experience and job title carry the strongest signal, followed by education and location. Individual skill flags and `skill_count` contribute much less once the main career variables are already known.
+
+The Streamlit app also provides a counterfactual skill comparison: it adds one available skill at a time and reports how much the model estimate changes. This is a model-estimated difference, not a causal promise that learning the skill will produce that salary increase.
+
+These explanations describe model behavior. They should not be interpreted as causal salary effects.
+
+## 🏆 Results
+
+Models were compared with three-fold cross-validation on a fixed 30,000-row subset of the training split.
+
+| Model | Mean CV R² |
+|---|---:|
+| ElasticNet | 0.7745 |
+| Random Forest | 0.8248 |
+| XGBoost | 0.8771 |
+| CatBoost | 0.8829 |
+| Tuned XGBoost | 0.8808 |
+| Tuned CatBoost | 0.8838 |
+| **Stacking** | **0.8838** |
+
+The stacking model was selected using the training split and evaluated once on the untouched 21,547-row test split:
+
+- **R²:** 0.8849
+- **MAE:** ₹155,014
+- **RMSE:** ₹207,766
+- **MAPE:** 10.31%
+
+The score is the result of one seeded training run on one public dataset and one held-out split. It should not be read as a universal salary-accuracy guarantee.
+
+## 🗂️ Notebook progression
+
+| Notebook | Purpose |
+|---|---|
+| [`EDA.ipynb`](notebooks/EDA.ipynb) | Investigates missing values, salary skew, outliers, inconsistent labels, feature relationships, and skill frequencies. |
+| [`Salary_Prediction.ipynb`](notebooks/Salary_Prediction.ipynb) | Rebuilds the shared cleaning and feature pipeline, compares baseline models, and loads the exported final metadata. |
+
+The notebooks show the reasoning, while `src/` contains the reusable implementation used by training and serving.
+
+The notebook workflow follows the same order as the project itself:
+
+```text
+inspect the data
+      ↓
+make deterministic cleanup decisions
+      ↓
+split before learned preprocessing
+      ↓
+compare models with CV
+      ↓
+load the exported result
+```
+
+## 🧩 MLOps and serving
+
+The MLOps layer is intentionally small but complete for this project:
+
+```text
+training code
+    ↓
+salary_model.pkl + metadata.pkl
+    ↓
+shared inference module
+    ├── Streamlit UI
+    └── FastAPI API
+              ↓
+          Docker runtime
+```
+
+The goal was not to add infrastructure for its own sake. Each layer solves a practical problem in the model’s path from experiment to use:
+
+- MLflow tracks model-comparison runs, CV metrics, final metrics, selected parameters where applicable, and exported artifacts.
+- `metadata.pkl` stores feature order, category options, skill names, metrics, and split sizes.
+- `src/inference.py` is the single path for validation, feature-row construction, column ordering, and prediction.
+- Streamlit uses the shared inference module for the interactive app.
+- FastAPI exposes `/health` and `/predict`.
+- Docker packages the API with pinned runtime dependencies.
+- Ruff, pre-commit, pytest, and GitHub Actions automate quality checks.
 
 ## 🚀 Quickstart
 
+### Run the complete local path
+
 ```bash
-# 1. install
 pip install -r requirements-dev.txt
-
-# 2. run the tests
-make test           # or: python -m pytest -q
-
-# 3. train, tune, and export the best model  (a few minutes)
-make train          # or: python -m src.train
-make train-fast     # tiny Optuna budget, for a quick end-to-end check
-
-# 4. launch the app
-make app            # or: streamlit run streamlit/app.py
-
-# 5. browse the experiment runs
-make mlflow
+pytest -q
+python -m src.train
+streamlit run streamlit/app.py
+docker build -t tech-salary-advisor .
+docker run --rm -p 8000:8000 tech-salary-advisor
 ```
 
-The trained model ships in `streamlit/models/`, so the app runs without retraining.
+The full training run performs model comparison, Optuna tuning, stacking, evaluation, MLflow logging, and artifact export. For a shorter smoke run, use:
 
----
-
-## 📁 Repository structure
-
+```bash
+python -m src.train --fast
 ```
+
+The exported model already ships in `streamlit/models/`, so retraining is optional for trying the app.
+
+### Run the FastAPI service
+
+```bash
+pip install -r requirements-api.txt
+uvicorn api.main:app --reload
+```
+
+Check the service and request a prediction:
+
+```bash
+curl http://localhost:8000/health
+curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -d "{\"job_title\":\"Data Scientist\",\"experience_years\":3,\"education\":\"Bachelor's\",\"location\":\"Bangalore\",\"skills\":[\"Python\",\"SQL\"]}"
+```
+
+The response contains `salary_inr` and `salary_lpa`. The demo API is unauthenticated; do not expose it to sensitive data without adding authentication.
+
+## 📁 Repository anatomy
+
+The repository is split by responsibility:
+
+- `notebooks/` explains the investigation.
+- `src/` contains reusable ML logic.
+- `tests/` protects the important data and inference paths.
+- `streamlit/` contains the user-facing application and exported model artifacts.
+- `api/` exposes the model over HTTP.
+- `Dockerfile` and `.github/` cover deployment and automation.
+
+```text
 Tech-Salary-Advisor/
-├── config.yaml                    # data paths, skills, features, tuning budget, output paths
+├── config.yaml                    # data, features, split, tuning, and output settings
 ├── data/
-│   └── salary_dataset_dirty.csv   # the raw dataset (see Dataset)
+│   └── salary_dataset_dirty.csv   # raw public dataset
 ├── src/
-│   ├── config.py                  # loads config.yaml
-│   ├── data.py                    # load + deterministic cleanup, flags, IQR cap
-│   ├── features.py                # skill flags + skill_count
-│   ├── pipeline.py                # ColumnTransformer + log-target regressor
-│   ├── evaluate.py                # MAE / RMSE / R² / MAPE / adjusted R²
-│   └── train.py                   # baselines → Optuna → stacking → MLflow → export
-├── tests/
-│   ├── test_data.py               # cleaning + imputation + outlier capping
-│   ├── test_features.py           # skill parsing + feature construction
-│   └── test_train.py              # CV-based model selection
-├── notebooks/
-│   ├── EDA.ipynb                  # data exploration and decisions
-│   └── Salary_Prediction.ipynb    # modeling walkthrough
-├── streamlit/
-│   ├── app.py                     # the prediction UI
-│   └── models/
-│       ├── salary_model.pkl       # deployed stacking pipeline
-│       └── metadata.pkl           # feature order, skills, metrics, dropdown options
-├── Makefile                       # install / test / train / app / mlflow
-├── requirements.txt
-├── requirements-dev.txt
-├── packages.txt                   # system deps for Streamlit Cloud
+│   ├── data.py                    # deterministic cleanup and missing indicators
+│   ├── features.py                # skill flags and skill_count
+│   ├── pipeline.py                # preprocessing and target transformation
+│   ├── evaluate.py                # regression metrics
+│   ├── inference.py               # shared validation and prediction path
+│   └── train.py                   # baselines, tuning, stacking, MLflow, and export
+├── api/main.py                    # FastAPI service
+├── streamlit/app.py               # interactive application
+├── streamlit/models/              # exported model and metadata
+├── notebooks/                     # EDA and modeling walkthroughs
+├── tests/                         # data, model, inference, and API tests
+├── Dockerfile                     # API runtime image
+├── .github/workflows/ci.yml       # Ruff, pytest, and Docker CI
+├── .pre-commit-config.yaml        # local quality hooks
+├── requirements-api.txt           # pinned API runtime dependencies
+├── requirements-dev.txt           # development and test dependencies
 └── README.md
 ```
 
----
+## 🛠️ Tools and acknowledgements
 
-## 📚 Dataset
+The project uses standard tools at each stage:
 
-| | |
-|---|---|
-| **Source** | [Indian Tech Salaries](https://www.kaggle.com/datasets/ashishprajapati223/indian-tech-salaries/data) (Kaggle) |
-| **Size** | ~110,000 rows |
-| **Target** | `Salary_INR`: annual salary in INR |
-| **Features** | `Job_Title`, `Experience_Years`, `Education_Level`, `Location`, `Skills` (comma-separated) |
+- pandas and NumPy for data work;
+- scikit-learn for preprocessing, evaluation, and model composition;
+- XGBoost and CatBoost for nonlinear regression;
+- Optuna for tuning;
+- MLflow for experiment tracking;
+- Streamlit and FastAPI for serving;
+- Docker and GitHub Actions for reproducibility and automation.
 
-The raw file has inconsistent casing, stray spaces, mixed education labels, skills stored as one
-string, and missing values. The EDA notebook documents these issues, and `src/data.py` contains the
-deterministic cleanup.
-
----
-
-## 🛠️ Tools
-
-Built with pandas, NumPy, scikit-learn, XGBoost, CatBoost, Optuna, MLflow, and Streamlit.
-
-The modeling techniques (target transforms, tuning, stacking, permutation importance) follow concepts
-from CampusX's *100 Days of Machine Learning*.
+This project follows a learning-first approach: use established libraries where they fit, keep reusable logic in `src/`, and add infrastructure only when it improves reproducibility or serving. The modeling techniques follow concepts from CampusX’s *100 Days of Machine Learning* curriculum.
 
 ## ⚖️ Limitations
 
-This is an educational project. The salary figures come from a single public dataset, and the metrics
-are from one training run with a fixed seed. Predictions are estimates, not offers, and should not be
-used as the sole basis for compensation or hiring decisions.
+This is an educational salary estimation project, not an authoritative market-rate system. The data comes from one public dataset and one seeded training run. The model does not account for company, industry, seniority band, negotiation, equity, employment gaps, or changing market conditions.
+
+The skill-comparison view shows model behavior, not causal salary effects. The API is unauthenticated and should not be exposed to sensitive data without an authentication layer.
+
+Predictions should not be used as the sole basis for compensation, hiring, or career decisions.
 
 ## License
 
-Released under the [MIT License](LICENSE). The dataset remains subject to its own terms on Kaggle.
+The original source code is released under the [MIT License](LICENSE). The dataset remains subject to its own terms on Kaggle.
