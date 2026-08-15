@@ -1,7 +1,9 @@
-"""Checks for the cleaning step: category mapping, imputation, outlier capping."""
+"""Checks for cleaning, validation, imputation, and outlier capping."""
 
+import json
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.data import (
     cap_outliers_iqr,
@@ -11,6 +13,7 @@ from src.data import (
     clean_location,
 )
 from src.pipeline import build_preprocessor
+from src.validate_data import DataValidationError, build_lineage, validate_data
 
 
 def test_title_mapping():
@@ -68,3 +71,84 @@ def test_cap_outliers_clips_tail():
     y = pd.Series([1, 2, 3, 4, 5, 1000])
     capped = cap_outliers_iqr(y)
     assert capped.max() < 1000
+
+
+def test_valid_data_passes_and_reports_quality_stats():
+    raw = pd.DataFrame(
+        {
+            "Job_Title": ["data scientist", "qa"],
+            "Experience_Years": [3.0, np.nan],
+            "Education_Level": ["btech", "btech"],
+            "Location": ["noida", "mumbai"],
+            "Skills": ["Python", "SQL"],
+            "Salary_INR": [1_000_000, 900_000],
+        }
+    )
+
+    with pytest.warns(UserWarning, match="Experience_Years"):
+        result = validate_data(raw)
+
+    assert result["status"] == "PASS"
+    assert result["row_count"] == 2
+    assert result["missingness"]["Experience_Years"] == 1
+    assert result["duplicate_rate"] == 0
+
+
+def test_validation_fails_for_missing_columns():
+    raw = pd.DataFrame({"Job_Title": ["data scientist"]})
+
+    with pytest.raises(DataValidationError) as exc_info:
+        validate_data(raw)
+
+    assert "Salary_INR" in exc_info.value.result["missing_columns"]
+
+
+def test_validation_fails_for_invalid_numeric_ranges():
+    raw = pd.DataFrame(
+        {
+            "Job_Title": ["data scientist", "qa"],
+            "Experience_Years": [-1, 101],
+            "Education_Level": ["btech", "btech"],
+            "Location": ["noida", "mumbai"],
+            "Skills": ["Python", "SQL"],
+            "Salary_INR": [1_000_000, -1],
+        }
+    )
+
+    with pytest.raises(DataValidationError) as exc_info:
+        validate_data(raw)
+
+    assert exc_info.value.result["numeric_ranges"]["Salary_INR"]["invalid_rows"] == 1
+
+
+def test_validation_and_lineage_are_json_safe(tmp_path):
+    raw_path = tmp_path / "salary.csv"
+    config_path = tmp_path / "config.yaml"
+    raw_path.write_bytes(b"raw data")
+    config_path.write_bytes(b"config")
+    validation = validate_data(
+        pd.DataFrame(
+            {
+                "Job_Title": ["qa"],
+                "Experience_Years": [1],
+                "Education_Level": ["btech"],
+                "Location": ["pune"],
+                "Skills": ["Python"],
+                "Salary_INR": [500_000],
+            }
+        )
+    )
+
+    lineage = build_lineage(
+        raw_path,
+        config_path,
+        validation,
+        cleaned_rows=1,
+        training_rows=1,
+        test_rows=0,
+        feature_count=3,
+    )
+
+    json.dumps({"validation": validation, "lineage": lineage})
+    assert len(lineage["raw_data_sha256"]) == 64
+    assert lineage["raw_rows"] == 1

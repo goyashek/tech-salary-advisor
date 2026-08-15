@@ -16,3 +16,7 @@ Thumbs.db
 mlruns/
 catboost_info/
 .pytest_cache/
+
+#local planning docs
+*.md
+!README.md

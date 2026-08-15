@@ -29,7 +29,7 @@
 | Evaluation | Training-only cross-validation and untouched held-out testing |
 | Explainability | Permutation importance and counterfactual profile comparisons |
 | Serving | Streamlit UI and typed FastAPI API |
-| MLOps | MLflow artifacts, Docker runtime, CI, tests, and pinned API dependencies |
+| MLOps | Raw-data validation, MLflow lineage, Docker runtime, CI, tests, and pinned API dependencies |
 
 - **Task:** Estimate annual salary in INR from role, experience, education, location, and skills.
 - **Dataset:** Approximately 110,000 public salary records; 107,735 remained after removing rows without a target.
@@ -55,7 +55,7 @@ The project did not begin as a polished application. It started with a dirty sal
 
 The early work focused on understanding the dataset: which columns were incomplete, how salary was distributed, how inconsistent labels should be standardized, and whether skills added useful signal after role and experience were known.
 
-Once the baseline pipeline worked, I moved toward model selection. Instead of choosing a model from the test set, I used cross-validation on the training data, tuned the strongest boosting models with Optuna, and evaluated the selected stack once on the untouched test split.
+Once the baseline pipeline worked, I added a raw-data validation gate so schema and numeric range problems fail before cleanup can hide them. Missingness and duplicate rates are recorded as quality statistics. I then moved toward model selection: instead of choosing a model from the test set, I used cross-validation on the training data, tuned the strongest boosting models with Optuna, and evaluated the selected stack once on the untouched test split.
 
 The final engineering work connected the trained artifact to Streamlit and FastAPI through one shared inference path, then added Docker, tests, linting, and GitHub Actions.
 
@@ -206,6 +206,8 @@ The MLOps layer is intentionally small but complete for this project:
 ```text
 training code
     ↓
+raw CSV validation
+    ↓
 salary_model.pkl + metadata.pkl
     ↓
 shared inference module
@@ -218,7 +220,9 @@ shared inference module
 The goal was not to add infrastructure for its own sake. Each layer solves a practical problem in the model’s path from experiment to use:
 
 - MLflow tracks model-comparison runs, CV metrics, final metrics, selected parameters where applicable, and exported artifacts.
-- `metadata.pkl` stores feature order, category options, skill names, metrics, and split sizes.
+- Raw-data validation checks required columns, numeric ranges, missingness, and duplicate rates before cleanup. Structural errors stop training; quality warnings are retained in the final run.
+- The final MLflow run stores machine-readable `data_validation.json` and `lineage.json` artifacts, including Git SHA, raw-data SHA-256, config hash, Python version, row counts, and feature count.
+- `metadata.pkl` stores feature order, category options, skill names, metrics, split sizes, validation results, and lineage.
 - `src/inference.py` is the single path for validation, feature-row construction, column ordering, and prediction.
 - Streamlit uses the shared inference module for the interactive app.
 - FastAPI exposes `/health` and `/predict`.
@@ -283,6 +287,7 @@ Tech-Salary-Advisor/
 │   ├── features.py                # skill flags and skill_count
 │   ├── pipeline.py                # preprocessing and target transformation
 │   ├── evaluate.py                # regression metrics
+│   ├── validate_data.py            # raw-data gate and training lineage
 │   ├── inference.py               # shared validation and prediction path
 │   └── train.py                   # baselines, tuning, stacking, MLflow, and export
 ├── api/main.py                    # FastAPI service

@@ -31,13 +31,16 @@ from src.data import cap_outliers_iqr, clean, load_raw
 from src.evaluate import regression_metrics
 from src.features import build_features
 from src.pipeline import build_pipeline, make_estimator
+from src.validate_data import build_lineage, validate_data
 
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 
 def _split(cfg):
-    df = clean(load_raw(ROOT / cfg["data"]["path"]), target=cfg["data"]["target"])
+    raw = load_raw(ROOT / cfg["data"]["path"])
+    validation = validate_data(raw, target=cfg["data"]["target"])
+    df = clean(raw, target=cfg["data"]["target"])
     df = build_features(df, cfg["skills"])
     y = df[cfg["data"]["target"]]
     X = df.drop(columns=[cfg["data"]["target"]])
@@ -49,7 +52,7 @@ def _split(cfg):
     )
     y_train = cap_outliers_iqr(y_train, cfg["outlier_iqr_factor"])
     median_exp = float(X_train["Experience_Years"].median())
-    return X, X_train, X_test, y_train, y_test, median_exp
+    return X, X_train, X_test, y_train, y_test, median_exp, validation
 
 
 def _tune(build_model, space, X, y, num, cat, n_trials, cv):
@@ -81,8 +84,17 @@ def main(config_path="config.yaml", fast=False):
     subset = 3000 if fast else cfg["tuning"]["subset_size"]
     cv = cfg["tuning"]["cv_folds"]
 
-    X, X_train, X_test, y_train, y_test, median_exp = _split(cfg)
+    X, X_train, X_test, y_train, y_test, median_exp, validation = _split(cfg)
     n_feat = X.shape[1]
+    lineage = build_lineage(
+        ROOT / cfg["data"]["path"],
+        config_path,
+        validation,
+        cleaned_rows=len(X),
+        training_rows=len(X_train),
+        test_rows=len(X_test),
+        feature_count=n_feat,
+    )
     print(f"train={X_train.shape} test={X_test.shape} features={n_feat}")
 
     Xs = X_train.sample(n=min(subset, len(X_train)), random_state=42)
@@ -293,6 +305,8 @@ def main(config_path="config.yaml", fast=False):
         "job_titles": cfg["job_titles"],
         "locations": cfg["locations"],
         "education_levels": cfg["education_levels"],
+        "data_validation": validation,
+        "lineage": lineage,
     }
     model_path = ROOT / cfg["output"]["model"]
     metadata_path = ROOT / cfg["output"]["metadata"]
@@ -302,10 +316,13 @@ def main(config_path="config.yaml", fast=False):
     joblib.dump(metadata, metadata_path)
     with mlflow.start_run(run_name=f"{best_name}_final"):
         mlflow.log_param("selected_model", best_name)
+        mlflow.log_params(lineage)
         mlflow.log_metric("selection_cv_r2", best["cv_r2"])
         mlflow.log_metrics(
             {f"test_{key}": value for key, value in best["metrics"].items()}
         )
+        mlflow.log_dict(validation, "data_validation.json")
+        mlflow.log_dict(lineage, "lineage.json")
         mlflow.log_artifact(str(model_path), artifact_path="model")
         mlflow.log_artifact(str(metadata_path), artifact_path="model")
     print(f"saved {cfg['output']['model']} and {cfg['output']['metadata']}")
