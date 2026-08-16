@@ -3,17 +3,13 @@
 Run: python -m src.train  (add --fast for a quick smoke run)
 
 Steps: deterministic clean -> split -> train-fitted preprocessing -> model
-comparison by cross-validation -> one final test evaluation -> export. Model
-comparison and final artifacts are logged to a local MLflow store.
+comparison by cross-validation -> validation-only promotion -> final test
+reporting -> registry/local fallback export. Runs use a local MLflow registry.
 """
 
 import argparse
-import os
 import warnings
 from pathlib import Path
-
-# Keep the simple local file store (./mlruns); no tracking server needed.
-os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
 
 import joblib
 import numpy as np
@@ -24,12 +20,19 @@ from sklearn.compose import TransformedTargetRegressor
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import ElasticNet, RidgeCV
 from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.neural_network import MLPRegressor
 from xgboost import XGBRegressor
 
 from src.config import ROOT, load_config
 from src.data import cap_outliers_iqr, clean, load_raw
 from src.evaluate import regression_metrics
 from src.features import build_features
+from src.model_registry import (
+    compare_candidate,
+    configure_mlflow,
+    get_champion_metrics,
+    register_candidate,
+)
 from src.pipeline import build_pipeline, make_estimator
 from src.validate_data import build_lineage, validate_data
 
@@ -44,15 +47,31 @@ def _split(cfg):
     df = build_features(df, cfg["skills"])
     y = df[cfg["data"]["target"]]
     X = df.drop(columns=[cfg["data"]["target"]])
-    X_train, X_test, y_train, y_test = train_test_split(
+    X_train_full, X_test, y_train_full_raw, y_test = train_test_split(
         X,
         y,
         test_size=cfg["split"]["test_size"],
         random_state=cfg["split"]["random_state"],
     )
-    y_train = cap_outliers_iqr(y_train, cfg["outlier_iqr_factor"])
-    median_exp = float(X_train["Experience_Years"].median())
-    return X, X_train, X_test, y_train, y_test, median_exp, validation
+    X_train, X_validation, y_train_raw, y_validation = train_test_split(
+        X_train_full,
+        y_train_full_raw,
+        test_size=cfg["split"].get("validation_size", 0.1),
+        random_state=cfg["split"]["random_state"],
+    )
+    return {
+        "X": X,
+        "X_train": X_train,
+        "X_train_full": X_train_full,
+        "X_validation": X_validation,
+        "X_test": X_test,
+        "y_train": cap_outliers_iqr(y_train_raw, cfg["outlier_iqr_factor"]),
+        "y_train_full": cap_outliers_iqr(y_train_full_raw, cfg["outlier_iqr_factor"]),
+        "y_validation": y_validation,
+        "y_test": y_test,
+        "median_exp": float(X_train_full["Experience_Years"].median()),
+        "validation": validation,
+    }
 
 
 def _tune(build_model, space, X, y, num, cat, n_trials, cv):
@@ -70,9 +89,21 @@ def _tune(build_model, space, X, y, num, cat, n_trials, cv):
     return study.best_params, study.best_value
 
 
-def select_best(results):
-    """Return the candidate with the strongest cross-validation score."""
-    return max(results, key=lambda name: results[name]["cv_r2"])
+def select_best(results, stacking_min_r2_gain=0.0):
+    """Prefer one model unless stacking earns its configured complexity cost."""
+    best_name = max(results, key=lambda name: results[name]["cv_r2"])
+    if best_name != "stacking":
+        return best_name
+    best_single = max(
+        (name for name in results if name != "stacking"),
+        key=lambda name: results[name]["cv_r2"],
+    )
+    if (
+        results["stacking"]["cv_r2"] - results[best_single]["cv_r2"]
+        < stacking_min_r2_gain
+    ):
+        return best_single
+    return best_name
 
 
 def main(config_path="config.yaml", fast=False):
@@ -84,7 +115,13 @@ def main(config_path="config.yaml", fast=False):
     subset = 3000 if fast else cfg["tuning"]["subset_size"]
     cv = cfg["tuning"]["cv_folds"]
 
-    X, X_train, X_test, y_train, y_test, median_exp, validation = _split(cfg)
+    data = _split(cfg)
+    X = data["X"]
+    X_train = data["X_train"]
+    X_test = data["X_test"]
+    y_train = data["y_train"]
+    y_test = data["y_test"]
+    validation = data["validation"]
     n_feat = X.shape[1]
     lineage = build_lineage(
         ROOT / cfg["data"]["path"],
@@ -92,25 +129,33 @@ def main(config_path="config.yaml", fast=False):
         validation,
         cleaned_rows=len(X),
         training_rows=len(X_train),
+        validation_rows=len(data["X_validation"]),
         test_rows=len(X_test),
         feature_count=n_feat,
     )
-    print(f"train={X_train.shape} test={X_test.shape} features={n_feat}")
+    print(
+        f"train={X_train.shape} validation={data['X_validation'].shape} "
+        f"test={X_test.shape} features={n_feat}"
+    )
 
     Xs = X_train.sample(n=min(subset, len(X_train)), random_state=42)
     ys = y_train.loc[Xs.index]
 
-    mlflow.set_tracking_uri(f"file:{ROOT / cfg['mlflow']['tracking_dir']}")
+    tracking_uri = configure_mlflow(cfg, mlflow)
     mlflow.set_experiment(cfg["mlflow"]["experiment"])
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(tracking_uri=tracking_uri, registry_uri=tracking_uri)
 
     results = {}
 
-    def record(name, pipe, extra=None):
+    def record(name, pipe, extra=None, explainability="medium"):
         scores = cross_val_score(pipe, Xs, ys, cv=cv, scoring="r2", n_jobs=1)
         results[name] = {
             "pipe": pipe,
             "cv_r2": float(scores.mean()),
             "cv_r2_std": float(scores.std()),
+            "explainability": explainability,
         }
         with mlflow.start_run(run_name=name):
             mlflow.log_params(extra or {})
@@ -124,6 +169,7 @@ def main(config_path="config.yaml", fast=False):
     record(
         "elasticnet",
         build_pipeline(ElasticNet(alpha=0.01, l1_ratio=0.5, random_state=42), num, cat),
+        explainability="high",
     )
     rf = RandomForestRegressor(
         n_estimators=cfg["random_forest"]["n_estimators"],
@@ -161,6 +207,28 @@ def main(config_path="config.yaml", fast=False):
             num,
             cat,
         ),
+    )
+    record(
+        "mlp",
+        build_pipeline(
+            MLPRegressor(
+                hidden_layer_sizes=(64, 32),
+                early_stopping=True,
+                validation_fraction=0.1,
+                n_iter_no_change=30,
+                max_iter=1000,
+                random_state=42,
+            ),
+            num,
+            cat,
+        ),
+        {
+            "hidden_layer_sizes": "64,32",
+            "early_stopping": True,
+            "n_iter_no_change": 30,
+            "max_iter": 1000,
+        },
+        explainability="low",
     )
 
     # --- Optuna tuning on the same training-only subset ---
@@ -255,17 +323,44 @@ def main(config_path="config.yaml", fast=False):
         TransformedTargetRegressor(
             regressor=stack, func=np.log1p, inverse_func=np.expm1
         ),
+        explainability="low",
     )
 
-    # --- Pick by CV, then touch the test set once ---
-    best_name = select_best(results)
+    # --- Pick by CV, then compare on the held-out promotion split ---
+    best_single = max(
+        (name for name in results if name != "stacking"),
+        key=lambda name: results[name]["cv_r2"],
+    )
+    stacking_gain = results["stacking"]["cv_r2"] - results[best_single]["cv_r2"]
+    best_name = select_best(results, cfg["tuning"]["stacking_min_r2_gain"])
     best = results[best_name]
     best["pipe"].fit(X_train, y_train)
+    promotion_metrics = regression_metrics(
+        data["y_validation"],
+        best["pipe"].predict(data["X_validation"]),
+        n_features=n_feat,
+    )
+    champion = get_champion_metrics(
+        client,
+        cfg["mlflow"]["registered_model"],
+        cfg["mlflow"]["champion_alias"],
+    )
+    promotion = compare_candidate(
+        {"mae": promotion_metrics["mae"], "r2": promotion_metrics["r2"]},
+        champion,
+        **cfg["mlflow"]["promotion"],
+    )
+
+    # Refit on the complete non-test pool only after the promotion decision.
+    best["pipe"].fit(data["X_train_full"], data["y_train_full"])
     best["metrics"] = regression_metrics(
         y_test, best["pipe"].predict(X_test), n_features=n_feat
     )
     print(
         f"\nWINNER BY CV: {best_name}  CV R2={best['cv_r2']:.4f}\n"
+        f"STACKING GAIN over {best_single}: {stacking_gain:+.4f}\n"
+        f"PROMOTION: {promotion['decision']}  validation R2={promotion_metrics['r2']:.4f} "
+        f"MAE={promotion_metrics['mae']:,.0f}\n"
         f"FINAL TEST: R2={best['metrics']['r2']:.4f}  MAE={best['metrics']['mae']:,.0f}"
     )
 
@@ -288,7 +383,7 @@ def main(config_path="config.yaml", fast=False):
     metadata = {
         "feature_columns": list(X.columns),
         "all_skills": cfg["skills"],
-        "median_exp": median_exp,
+        "median_exp": data["median_exp"],
         "model_name": best_name,
         "mae": float(best["metrics"]["mae"]),
         "rmse": float(best["metrics"]["rmse"]),
@@ -296,36 +391,74 @@ def main(config_path="config.yaml", fast=False):
         "mape": float(best["metrics"]["mape"]),
         "selection_cv_r2": float(best["cv_r2"]),
         "cv_results": {
-            name: {"mean": result["cv_r2"], "std": result["cv_r2_std"]}
+            name: {
+                "mean": result["cv_r2"],
+                "std": result["cv_r2_std"],
+                "explainability": result["explainability"],
+            }
             for name, result in results.items()
+        },
+        "stacking_comparison": {
+            "best_single_model": best_single,
+            "best_single_cv_r2": results[best_single]["cv_r2"],
+            "stacking_cv_r2": results["stacking"]["cv_r2"],
+            "stacking_gain": stacking_gain,
+            "minimum_required_gain": cfg["tuning"]["stacking_min_r2_gain"],
         },
         "dataset_rows": len(X),
         "training_rows": len(X_train),
+        "validation_rows": len(data["X_validation"]),
         "test_rows": len(X_test),
         "job_titles": cfg["job_titles"],
         "locations": cfg["locations"],
         "education_levels": cfg["education_levels"],
         "data_validation": validation,
         "lineage": lineage,
+        "promotion": promotion,
+        "promotion_metrics": promotion_metrics,
     }
     model_path = ROOT / cfg["output"]["model"]
     metadata_path = ROOT / cfg["output"]["metadata"]
-    for path in (model_path, metadata_path):
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(best["pipe"], model_path)
-    joblib.dump(metadata, metadata_path)
-    with mlflow.start_run(run_name=f"{best_name}_final"):
+    with mlflow.start_run(run_name=f"{best_name}_candidate"):
         mlflow.log_param("selected_model", best_name)
         mlflow.log_params(lineage)
         mlflow.log_metric("selection_cv_r2", best["cv_r2"])
+        mlflow.log_metrics(
+            {f"validation_{key}": value for key, value in promotion_metrics.items()}
+        )
         mlflow.log_metrics(
             {f"test_{key}": value for key, value in best["metrics"].items()}
         )
         mlflow.log_dict(validation, "data_validation.json")
         mlflow.log_dict(lineage, "lineage.json")
-        mlflow.log_artifact(str(model_path), artifact_path="model")
-        mlflow.log_artifact(str(metadata_path), artifact_path="model")
-    print(f"saved {cfg['output']['model']} and {cfg['output']['metadata']}")
+        mlflow.log_dict(promotion, "promotion.json")
+        model_info = mlflow.sklearn.log_model(
+            best["pipe"],
+            artifact_path="model",
+            serialization_format="cloudpickle",
+        )
+        version = register_candidate(
+            mlflow,
+            client,
+            model_info.model_uri,
+            cfg["mlflow"]["registered_model"],
+            promotion["candidate"],
+            promotion,
+            lineage,
+            cfg["mlflow"]["challenger_alias"],
+            cfg["mlflow"]["champion_alias"],
+        )
+        metadata["registry_version"] = str(version.version)
+        mlflow.log_dict(metadata, "model/metadata.json")
+
+    if promotion["decision"] == "promote":
+        for path in (model_path, metadata_path):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(best["pipe"], model_path)
+        joblib.dump(metadata, metadata_path)
+        print(f"promoted registry version {version.version}; saved local fallback")
+    else:
+        print("candidate rejected; existing champion and local fallback remain")
     return results, metadata
 
 

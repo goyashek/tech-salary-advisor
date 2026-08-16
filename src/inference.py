@@ -1,5 +1,6 @@
 """Load the exported model and turn a career profile into one prediction row."""
 
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -9,12 +10,46 @@ import pandas as pd
 
 from src.config import ROOT, load_config
 from src.data import clean_education, clean_job_title, clean_location
+from src.model_registry import configure_mlflow
+
+
+def _load_registry_assets(cfg):
+    import mlflow
+    from mlflow.artifacts import download_artifacts
+    from mlflow.tracking import MlflowClient
+
+    tracking_uri = configure_mlflow(cfg, mlflow)
+    if tracking_uri.startswith("sqlite:///"):
+        db_path = Path(tracking_uri[len("sqlite:///") :])
+        if not db_path.exists():
+            raise FileNotFoundError(db_path)
+    client = MlflowClient(tracking_uri=tracking_uri, registry_uri=tracking_uri)
+    model_name = cfg["mlflow"]["registered_model"]
+    alias = cfg["mlflow"]["champion_alias"]
+    version = client.get_model_version_by_alias(model_name, alias)
+    model = mlflow.sklearn.load_model(f"models:/{model_name}@{alias}")
+    metadata_path = download_artifacts(
+        run_id=version.run_id,
+        artifact_path="model/metadata.json",
+        tracking_uri=tracking_uri,
+        registry_uri=tracking_uri,
+    )
+    with Path(metadata_path).open() as handle:
+        metadata = json.load(handle)
+    return model, metadata
 
 
 @lru_cache(maxsize=1)
 def load_model_assets(model_path=None, metadata_path=None):
     """Load model assets once per process."""
     cfg = load_config()
+    if model_path is None and metadata_path is None:
+        try:
+            return _load_registry_assets(cfg)
+        # ponytail: broad fallback keeps local serving alive; narrow this to
+        # MLflow errors if registry diagnostics become important.
+        except Exception:
+            pass
     model_path = (
         ROOT / cfg["output"]["model"] if model_path is None else Path(model_path)
     )

@@ -134,6 +134,7 @@ def build_lineage(
     training_rows,
     test_rows,
     feature_count,
+    validation_rows=0,
 ):
     """Build the small reproducibility record attached to the final run."""
     root = Path(__file__).resolve().parents[1]
@@ -151,6 +152,7 @@ def build_lineage(
         "raw_rows": int(validation["row_count"]),
         "cleaned_rows": int(cleaned_rows),
         "training_rows": int(training_rows),
+        "validation_rows": int(validation_rows),
         "test_rows": int(test_rows),
         "feature_count": int(feature_count),
     }

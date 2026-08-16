@@ -1,4 +1,4 @@
-.PHONY: install install-dev test train train-fast app mlflow clean
+.PHONY: install install-dev test train train-fast keras-benchmark app mlflow clean
 
 install:
 	pip install -r requirements.txt
@@ -17,12 +17,15 @@ train:
 train-fast:
 	python -m src.train --fast
 
+keras-benchmark:
+	.venv/bin/python -m src.keras_benchmark
+
 app:
 	streamlit run streamlit/app.py
 
 # Browse the logged experiments.
 mlflow:
-	MLFLOW_ALLOW_FILE_STORE=true mlflow ui --backend-store-uri mlruns
+	mlflow ui --backend-store-uri sqlite:///mlflow.db
 
 clean:
-	rm -rf mlruns .pytest_cache __pycache__ src/__pycache__ tests/__pycache__
+	rm -rf mlruns mlflow.db .pytest_cache __pycache__ src/__pycache__ tests/__pycache__

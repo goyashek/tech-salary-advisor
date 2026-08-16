@@ -12,8 +12,8 @@
 [![Live Demo](https://img.shields.io/badge/Streamlit-Live%20Demo-FF4B4B?logo=streamlit&logoColor=white)](https://tech-salary-advisor.streamlit.app/)
 [![CI](https://github.com/goyashek/Tech-Salary-Advisor/actions/workflows/ci.yml/badge.svg)](https://github.com/goyashek/Tech-Salary-Advisor/actions/workflows/ci.yml)
 
-![Best Model](https://img.shields.io/badge/Best%20Model-Stacking%20(XGB%2BCatBoost)-success)
-![R2](https://img.shields.io/badge/Held--out%20R²-0.885-blue)
+![Best Model](https://img.shields.io/badge/Best%20Model-Tuned%20CatBoost-success)
+![R2](https://img.shields.io/badge/Held--out%20R²-0.884-blue)
 ![MAE](https://img.shields.io/badge/MAE-%E2%82%B91.55%20LPA-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -25,17 +25,17 @@
 
 | Area | What this project demonstrates |
 |---|---|
-| Modeling | Regression, log-target transformation, Optuna, and stacking |
-| Evaluation | Training-only cross-validation and untouched held-out testing |
+| Modeling | Regression, log-target transformation, Optuna, sklearn/Keras ANN benchmarks, and complexity-aware selection |
+| Evaluation | Training-only CV, promotion validation, and untouched final testing |
 | Explainability | Permutation importance and counterfactual profile comparisons |
 | Serving | Streamlit UI and typed FastAPI API |
-| MLOps | Raw-data validation, MLflow lineage, Docker runtime, CI, tests, and pinned API dependencies |
+| MLOps | Raw-data validation, MLflow registry/promotion, Docker runtime, CI, tests, and pinned API dependencies |
 
 - **Task:** Estimate annual salary in INR from role, experience, education, location, and skills.
 - **Dataset:** Approximately 110,000 public salary records; 107,735 remained after removing rows without a target.
-- **Best model:** XGBoost + CatBoost stacking ensemble selected by training-only cross-validation.
-- **Held-out R²:** 0.8849
-- **Held-out MAE:** ₹155,014
+- **Best model:** Tuned CatBoost; stacking did not earn its added complexity.
+- **Held-out R²:** 0.8841
+- **Held-out MAE:** ₹155,414
 
 ## 🎥 Demo
 
@@ -55,9 +55,9 @@ The project did not begin as a polished application. It started with a dirty sal
 
 The early work focused on understanding the dataset: which columns were incomplete, how salary was distributed, how inconsistent labels should be standardized, and whether skills added useful signal after role and experience were known.
 
-Once the baseline pipeline worked, I added a raw-data validation gate so schema and numeric range problems fail before cleanup can hide them. Missingness and duplicate rates are recorded as quality statistics. I then moved toward model selection: instead of choosing a model from the test set, I used cross-validation on the training data, tuned the strongest boosting models with Optuna, and evaluated the selected stack once on the untouched test split.
+Once the baseline pipeline worked, I added a raw-data validation gate so schema and numeric range problems fail before cleanup can hide them. Missingness and duplicate rates are recorded as quality statistics. I then moved toward model selection: instead of choosing a model from the test set, I used cross-validation on the training data, benchmarked a small neural network, tuned the strongest boosting models with Optuna, and evaluated the selected model once on the untouched test split.
 
-The final engineering work connected the trained artifact to Streamlit and FastAPI through one shared inference path, then added Docker, tests, linting, and GitHub Actions.
+The final engineering work connected the trained artifact to Streamlit and FastAPI through one shared inference path, then added validation, MLflow registry promotion, Docker, tests, linting, and GitHub Actions.
 
 The commit history reflects that progression:
 
@@ -116,7 +116,9 @@ The model progression was deliberately incremental:
 2. **Random Forest** as a nonlinear tree ensemble.
 3. **XGBoost and CatBoost** as stronger boosting candidates.
 4. **Optuna tuning** for XGBoost and CatBoost using a seeded TPE search.
-5. **RidgeCV stacking** to combine the two tuned learners.
+5. **A small sklearn MLP** as a neural-network performance/explainability benchmark.
+6. **A standalone Keras ANN experiment** to test whether a stronger neural training recipe closes the gap.
+7. **RidgeCV stacking** as a candidate that must beat the best single model by at least 0.002 CV R².
 
 Several techniques were used because they addressed specific properties of the problem:
 
@@ -127,7 +129,9 @@ Several techniques were used because they addressed specific properties of the p
 - CatBoost and XGBoost for nonlinear interactions between career variables.
 - Training-only IQR target capping to reduce the influence of extreme salary values.
 - Seeded Optuna tuning and fixed train/test splits for reproducibility.
-- RidgeCV as the stacking meta-model.
+- Early stopping for the sklearn MLP benchmark.
+- Training-fold target standardization, He initialization, BatchNorm, Dropout, AdamW, learning-rate reduction, and restored-best-weight early stopping for the Keras ANN.
+- RidgeCV as a stacking candidate, with a material-gain rule before it can be selected.
 
 The final modeling path is:
 
@@ -136,9 +140,7 @@ profile features
       ↓
 train-fitted preprocessing
       ↓
-tuned XGBoost ─┐
-                ├── RidgeCV stacking model
-tuned CatBoost ┘
+tuned CatBoost
       ↓
 salary estimate in INR
 ```
@@ -149,6 +151,10 @@ The project uses lightweight, model-agnostic explainability rather than treating
 
 Permutation importance on the held-out split shows that experience and job title carry the strongest signal, followed by education and location. Individual skill flags and `skill_count` contribute much less once the main career variables are already known.
 
+The registered run's sklearn MLP benchmark reached 0.8638 CV R². More patience improved it to 0.8666, and a standalone Keras ANN experiment reached 0.8753 on the local Metal GPU. The stronger neural recipe closed most of the gap but still trailed tuned CatBoost's 0.8802 by 0.0049. It was only an experiment: it did not use promotion validation, enter the registry, affect serving, or touch the final test. Stacking reached 0.8803, only 0.0001 above tuned CatBoost, so the simpler single model won under the 0.002 minimum-gain rule.
+
+The ANN also has the weakest xAI story in this comparison. Dense-layer weights do not map cleanly back to salary drivers after one-hot encoding and nonlinear interactions. Model-agnostic permutation importance could still be applied, but it would be post-hoc, can divide credit across correlated inputs, and would explain associations learned by the model rather than causal salary effects. That added explanation burden was not justified without a performance gain over CatBoost.
+
 The Streamlit app also provides a counterfactual skill comparison: it adds one available skill at a time and reports how much the model estimate changes. This is a model-estimated difference, not a causal promise that learning the skill will produce that salary increase.
 
 These explanations describe model behavior. They should not be interpreted as causal salary effects.
@@ -157,22 +163,24 @@ These explanations describe model behavior. They should not be interpreted as ca
 
 Models were compared with three-fold cross-validation on a fixed 30,000-row subset of the training split.
 
-| Model | Mean CV R² |
-|---|---:|
-| ElasticNet | 0.7745 |
-| Random Forest | 0.8248 |
-| XGBoost | 0.8771 |
-| CatBoost | 0.8829 |
-| Tuned XGBoost | 0.8808 |
-| Tuned CatBoost | 0.8838 |
-| **Stacking** | **0.8838** |
+| Model | Explainability | Mean CV R² |
+|---|---|---:|
+| ElasticNet | High | 0.7677 |
+| Random Forest | Medium | 0.8185 |
+| XGBoost | Medium | 0.8730 |
+| CatBoost | Medium | 0.8790 |
+| sklearn MLP | Low | 0.8638 |
+| Keras ANN | Low | 0.8753 |
+| Tuned XGBoost | Medium | 0.8775 |
+| **Tuned CatBoost** | **Medium** | **0.8802** |
+| Stacking | Low | 0.8803 |
 
-The stacking model was selected using the training split and evaluated once on the untouched 21,547-row test split:
+Stacking's raw gain over tuned CatBoost was only 0.00006 CV R², below the configured 0.002 requirement. Tuned CatBoost was promoted with validation R² 0.8812 and validation MAE ₹158,032, then evaluated once on the untouched 21,547-row final test split:
 
-- **R²:** 0.8849
-- **MAE:** ₹155,014
-- **RMSE:** ₹207,766
-- **MAPE:** 10.31%
+- **R²:** 0.8841
+- **MAE:** ₹155,414
+- **RMSE:** ₹208,545
+- **MAPE:** 10.32%
 
 The score is the result of one seeded training run on one public dataset and one held-out split. It should not be read as a universal salary-accuracy guarantee.
 
@@ -204,11 +212,15 @@ load the exported result
 The MLOps layer is intentionally small but complete for this project:
 
 ```text
-training code
-    ↓
 raw CSV validation
     ↓
-salary_model.pkl + metadata.pkl
+training and CV
+    ↓
+MLflow candidate
+    ↓
+validation-only promotion gate
+    ├── rejected → existing champion remains
+    └── promoted → @champion
     ↓
 shared inference module
     ├── Streamlit UI
@@ -219,10 +231,12 @@ shared inference module
 
 The goal was not to add infrastructure for its own sake. Each layer solves a practical problem in the model’s path from experiment to use:
 
-- MLflow tracks model-comparison runs, CV metrics, final metrics, selected parameters where applicable, and exported artifacts.
+- MLflow uses a local SQLite backend for model-comparison runs, candidate models, validation metrics, aliases, and artifacts.
 - Raw-data validation checks required columns, numeric ranges, missingness, and duplicate rates before cleanup. Structural errors stop training; quality warnings are retained in the final run.
-- The final MLflow run stores machine-readable `data_validation.json` and `lineage.json` artifacts, including Git SHA, raw-data SHA-256, config hash, Python version, row counts, and feature count.
-- `metadata.pkl` stores feature order, category options, skill names, metrics, split sizes, validation results, and lineage.
+- The candidate is compared with `@champion` on a separate validation split: MAE may worsen by at most 2%, and R² may fall by at most 0.005. The final test split is reporting-only.
+- A promoted candidate receives `@challenger` and `@champion`; a rejected candidate leaves the existing champion and local fallback untouched.
+- Inference loads `models:/tech-salary-advisor@champion` when MLflow and the registry are available, then falls back to `streamlit/models/` for the Docker/local artifact path.
+- The final MLflow run stores machine-readable `data_validation.json`, `lineage.json`, `promotion.json`, and model metadata artifacts.
 - `src/inference.py` is the single path for validation, feature-row construction, column ordering, and prediction.
 - Streamlit uses the shared inference module for the interactive app.
 - FastAPI exposes `/health` and `/predict`.
@@ -242,13 +256,31 @@ docker build -t tech-salary-advisor .
 docker run --rm -p 8000:8000 tech-salary-advisor
 ```
 
-The full training run performs model comparison, Optuna tuning, stacking, evaluation, MLflow logging, and artifact export. For a shorter smoke run, use:
+To inspect the registry in another terminal:
+
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
+The full training run performs model comparison, Optuna tuning, stacking, validation-gated registry promotion, final evaluation, and local fallback export. For a shorter smoke run, use:
 
 ```bash
 python -m src.train --fast
 ```
 
 The exported model already ships in `streamlit/models/`, so retraining is optional for trying the app.
+
+### Run the optional Keras ANN benchmark on Apple Silicon
+
+```bash
+conda create --prefix ./.venv python=3.12 pip -y
+.venv/bin/pip install -r requirements-keras-macos.txt
+make keras-benchmark
+```
+
+TensorFlow uses Metal automatically when the GPU is available. The recorded
+three-fold run used the same 30,000-row training-only subset and did not inspect
+promotion-validation or final-test labels.
 
 ### Run the FastAPI service
 
@@ -287,8 +319,10 @@ Tech-Salary-Advisor/
 │   ├── features.py                # skill flags and skill_count
 │   ├── pipeline.py                # preprocessing and target transformation
 │   ├── evaluate.py                # regression metrics
+│   ├── model_registry.py           # MLflow aliases and promotion gate
 │   ├── validate_data.py            # raw-data gate and training lineage
 │   ├── inference.py               # shared validation and prediction path
+│   ├── keras_benchmark.py          # optional regularized Keras ANN comparison
 │   └── train.py                   # baselines, tuning, stacking, MLflow, and export
 ├── api/main.py                    # FastAPI service
 ├── streamlit/app.py               # interactive application
@@ -300,6 +334,7 @@ Tech-Salary-Advisor/
 ├── .pre-commit-config.yaml        # local quality hooks
 ├── requirements-api.txt           # pinned API runtime dependencies
 ├── requirements-dev.txt           # development and test dependencies
+├── requirements-keras-macos.txt   # optional Apple Silicon Keras environment
 └── README.md
 ```
 
@@ -310,6 +345,7 @@ The project uses standard tools at each stage:
 - pandas and NumPy for data work;
 - scikit-learn for preprocessing, evaluation, and model composition;
 - XGBoost and CatBoost for nonlinear regression;
+- Keras/TensorFlow for the optional regularized ANN benchmark;
 - Optuna for tuning;
 - MLflow for experiment tracking;
 - Streamlit and FastAPI for serving;

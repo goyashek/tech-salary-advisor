@@ -59,7 +59,10 @@ if st.button("Predict Salary"):
     )
     st.write(f"**Predicted Salary in INR**: ₹ {int(prediction):,}")
     st.write(
-        f"**Expected Range (±MAE)**: ₹ {(prediction - metadata['mae']):,.0f} - ₹ {(prediction + metadata['mae']):,.0f} (₹ {lpa - mae_lpa:.2f} LPA - ₹ {lpa + mae_lpa:.2f} LPA)"
+        f"**Rough MAE band (not a confidence interval)**: "
+        f"₹ {(prediction - metadata['mae']):,.0f} - "
+        f"₹ {(prediction + metadata['mae']):,.0f} "
+        f"(₹ {lpa - mae_lpa:.2f} LPA - ₹ {lpa + mae_lpa:.2f} LPA)"
     )
 
     st.write("---")

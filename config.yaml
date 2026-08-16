@@ -35,6 +35,7 @@ categorical_features:
 
 split:
   test_size: 0.2
+  validation_size: 0.1
   random_state: 42
 
 # Cap the training target to the IQR fence to stop a few extreme
@@ -47,6 +48,7 @@ tuning:
   n_trials: 15
   cv_folds: 3
   subset_size: 30000
+  stacking_min_r2_gain: 0.002
 
 random_forest:
   n_estimators: 200
@@ -54,7 +56,13 @@ random_forest:
 
 mlflow:
   experiment: tech-salary-advisor
-  tracking_dir: mlruns
+  tracking_uri: sqlite:///mlflow.db
+  registered_model: tech-salary-advisor
+  champion_alias: champion
+  challenger_alias: challenger
+  promotion:
+    max_mae_ratio: 1.02
+    min_r2_delta: -0.005
 
 output:
   model: streamlit/models/salary_model.pkl
