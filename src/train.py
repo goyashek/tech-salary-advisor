@@ -14,6 +14,7 @@ from pathlib import Path
 import joblib
 import numpy as np
 import optuna
+import pandas as pd
 from catboost import CatBoostRegressor
 from sklearn.ensemble import RandomForestRegressor, StackingRegressor
 from sklearn.compose import TransformedTargetRegressor
@@ -25,7 +26,12 @@ from xgboost import XGBRegressor
 
 from src.config import ROOT, load_config
 from src.data import cap_outliers_iqr, clean, load_raw
-from src.evaluate import regression_metrics
+from src.evaluate import (
+    conformal_interval,
+    conformal_quantile,
+    interval_report,
+    regression_metrics,
+)
 from src.features import build_features
 from src.model_registry import (
     compare_candidate,
@@ -59,19 +65,41 @@ def _split(cfg):
         test_size=cfg["split"].get("validation_size", 0.1),
         random_state=cfg["split"]["random_state"],
     )
+    X_train, X_calibration, y_train_raw, y_calibration = train_test_split(
+        X_train,
+        y_train_raw,
+        test_size=cfg["split"].get("calibration_size", 0.1),
+        random_state=cfg["split"]["random_state"],
+    )
+    X_fit_full = pd.concat([X_train, X_validation])
+    y_fit_full_raw = pd.concat([y_train_raw, y_validation])
     return {
         "X": X,
         "X_train": X_train,
-        "X_train_full": X_train_full,
+        "X_fit_full": X_fit_full,
         "X_validation": X_validation,
+        "X_calibration": X_calibration,
         "X_test": X_test,
         "y_train": cap_outliers_iqr(y_train_raw, cfg["outlier_iqr_factor"]),
-        "y_train_full": cap_outliers_iqr(y_train_full_raw, cfg["outlier_iqr_factor"]),
+        "y_fit_full": cap_outliers_iqr(y_fit_full_raw, cfg["outlier_iqr_factor"]),
         "y_validation": y_validation,
+        "y_calibration": y_calibration,
         "y_test": y_test,
-        "median_exp": float(X_train_full["Experience_Years"].median()),
+        "median_exp": float(X_fit_full["Experience_Years"].median()),
         "validation": validation,
     }
+
+
+def _interval_segments(frame):
+    experience = frame["Experience_Years"].to_numpy(dtype=float)
+    buckets = np.full(len(frame), "missing", dtype=object)
+    finite = np.isfinite(experience)
+    buckets[finite & (experience <= 2)] = "0-2"
+    buckets[finite & (experience > 2) & (experience <= 5)] = "3-5"
+    buckets[finite & (experience > 5) & (experience <= 10)] = "6-10"
+    buckets[finite & (experience > 10)] = "11+"
+    titles = frame["Job_Title"].fillna("missing").astype(str).to_numpy()
+    return {"experience_bucket": buckets, "job_title": titles}
 
 
 def _tune(build_model, space, X, y, num, cat, n_trials, cv):
@@ -121,6 +149,7 @@ def main(config_path="config.yaml", fast=False):
     X_test = data["X_test"]
     y_train = data["y_train"]
     y_test = data["y_test"]
+    interval_level = cfg.get("prediction_interval", {}).get("level", 0.9)
     validation = data["validation"]
     n_feat = X.shape[1]
     lineage = build_lineage(
@@ -128,13 +157,15 @@ def main(config_path="config.yaml", fast=False):
         config_path,
         validation,
         cleaned_rows=len(X),
-        training_rows=len(X_train),
+        training_rows=len(data["X_fit_full"]),
         validation_rows=len(data["X_validation"]),
+        calibration_rows=len(data["X_calibration"]),
         test_rows=len(X_test),
         feature_count=n_feat,
     )
     print(
         f"train={X_train.shape} validation={data['X_validation'].shape} "
+        f"calibration={data['X_calibration'].shape} "
         f"test={X_test.shape} features={n_feat}"
     )
 
@@ -351,17 +382,38 @@ def main(config_path="config.yaml", fast=False):
         **cfg["mlflow"]["promotion"],
     )
 
-    # Refit on the complete non-test pool only after the promotion decision.
-    best["pipe"].fit(data["X_train_full"], data["y_train_full"])
-    best["metrics"] = regression_metrics(
-        y_test, best["pipe"].predict(X_test), n_features=n_feat
+    # Refit without calibration rows, then use their untouched residuals for intervals.
+    best["pipe"].fit(data["X_fit_full"], data["y_fit_full"])
+    calibration_predictions = best["pipe"].predict(data["X_calibration"])
+    interval_half_width = conformal_quantile(
+        data["y_calibration"], calibration_predictions, level=interval_level
     )
+    calibration_lower, calibration_upper = conformal_interval(
+        calibration_predictions, interval_half_width
+    )
+    calibration_interval = interval_report(
+        data["y_calibration"].to_numpy(),
+        calibration_lower,
+        calibration_upper,
+        _interval_segments(data["X_calibration"]),
+    )
+    test_predictions = best["pipe"].predict(X_test)
+    test_lower, test_upper = conformal_interval(test_predictions, interval_half_width)
+    test_interval = interval_report(
+        y_test.to_numpy(),
+        test_lower,
+        test_upper,
+        _interval_segments(X_test),
+    )
+    best["metrics"] = regression_metrics(y_test, test_predictions, n_features=n_feat)
     print(
         f"\nWINNER BY CV: {best_name}  CV R2={best['cv_r2']:.4f}\n"
         f"STACKING GAIN over {best_single}: {stacking_gain:+.4f}\n"
         f"PROMOTION: {promotion['decision']}  validation R2={promotion_metrics['r2']:.4f} "
         f"MAE={promotion_metrics['mae']:,.0f}\n"
-        f"FINAL TEST: R2={best['metrics']['r2']:.4f}  MAE={best['metrics']['mae']:,.0f}"
+        f"FINAL TEST: R2={best['metrics']['r2']:.4f}  MAE={best['metrics']['mae']:,.0f}\n"
+        f"90% INTERVAL: half-width=₹{interval_half_width:,.0f} "
+        f"calibration coverage={calibration_interval['coverage']:.3f}"
     )
 
     # --- Permutation importance on the winner ---
@@ -406,8 +458,9 @@ def main(config_path="config.yaml", fast=False):
             "minimum_required_gain": cfg["tuning"]["stacking_min_r2_gain"],
         },
         "dataset_rows": len(X),
-        "training_rows": len(X_train),
+        "training_rows": len(data["X_fit_full"]),
         "validation_rows": len(data["X_validation"]),
+        "calibration_rows": len(data["X_calibration"]),
         "test_rows": len(X_test),
         "job_titles": cfg["job_titles"],
         "locations": cfg["locations"],
@@ -416,6 +469,13 @@ def main(config_path="config.yaml", fast=False):
         "lineage": lineage,
         "promotion": promotion,
         "promotion_metrics": promotion_metrics,
+        "prediction_interval": {
+            "method": "split_conformal",
+            "level": float(interval_level),
+            "quantile_inr": interval_half_width,
+            "calibration": calibration_interval,
+            "final_test": test_interval,
+        },
     }
     model_path = ROOT / cfg["output"]["model"]
     metadata_path = ROOT / cfg["output"]["metadata"]
@@ -429,9 +489,20 @@ def main(config_path="config.yaml", fast=False):
         mlflow.log_metrics(
             {f"test_{key}": value for key, value in best["metrics"].items()}
         )
+        mlflow.log_metrics(
+            {
+                "interval_level": interval_level,
+                "interval_half_width_inr": interval_half_width,
+                "calibration_interval_coverage": calibration_interval["coverage"],
+                "calibration_interval_mean_width": calibration_interval["mean_width"],
+                "test_interval_coverage": test_interval["coverage"],
+                "test_interval_mean_width": test_interval["mean_width"],
+            }
+        )
         mlflow.log_dict(validation, "data_validation.json")
         mlflow.log_dict(lineage, "lineage.json")
         mlflow.log_dict(promotion, "promotion.json")
+        mlflow.log_dict(metadata["prediction_interval"], "prediction_interval.json")
         model_info = mlflow.sklearn.log_model(
             best["pipe"],
             artifact_path="model",

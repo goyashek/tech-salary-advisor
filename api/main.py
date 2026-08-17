@@ -3,7 +3,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from src.inference import predict_salary_inr
+from src.inference import predict_salary_interval
 
 app = FastAPI(title="Tech Salary Advisor API")
 
@@ -19,6 +19,11 @@ class SalaryProfile(BaseModel):
 class SalaryPrediction(BaseModel):
     salary_inr: int
     salary_lpa: float
+    interval_level: float
+    interval_lower_inr: int
+    interval_upper_inr: int
+    interval_lower_lpa: float
+    interval_upper_lpa: float
 
 
 @app.get("/health")
@@ -29,7 +34,7 @@ def health() -> dict[str, str]:
 @app.post("/predict", response_model=SalaryPrediction)
 def predict(profile: SalaryProfile) -> SalaryPrediction:
     try:
-        estimate = predict_salary_inr(
+        result = predict_salary_interval(
             profile.job_title,
             profile.experience_years,
             profile.education,
@@ -39,6 +44,11 @@ def predict(profile: SalaryProfile) -> SalaryPrediction:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return SalaryPrediction(
-        salary_inr=round(estimate),
-        salary_lpa=round(estimate / 100_000, 2),
+        salary_inr=round(result["salary_inr"]),
+        salary_lpa=round(result["salary_inr"] / 100_000, 2),
+        interval_level=result["level"],
+        interval_lower_inr=round(result["lower_inr"]),
+        interval_upper_inr=round(result["upper_inr"]),
+        interval_lower_lpa=round(result["lower_inr"] / 100_000, 2),
+        interval_upper_lpa=round(result["upper_inr"] / 100_000, 2),
     )

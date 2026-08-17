@@ -26,16 +26,17 @@
 | Area | What this project demonstrates |
 |---|---|
 | Modeling | Regression, log-target transformation, Optuna, sklearn/Keras ANN benchmarks, and complexity-aware selection |
-| Evaluation | Training-only CV, promotion validation, and untouched final testing |
+| Evaluation | Training-only CV, promotion validation, conformal calibration, and untouched final testing |
 | Explainability | Permutation importance and counterfactual profile comparisons |
-| Serving | Streamlit UI and typed FastAPI API |
+| Serving | Streamlit UI and typed FastAPI API with calibrated intervals |
 | MLOps | Raw-data validation, MLflow registry/promotion, Docker runtime, CI, tests, and pinned API dependencies |
 
 - **Task:** Estimate annual salary in INR from role, experience, education, location, and skills.
 - **Dataset:** Approximately 110,000 public salary records; 107,735 remained after removing rows without a target.
 - **Best model:** Tuned CatBoost; stacking did not earn its added complexity.
-- **Held-out R²:** 0.8841
-- **Held-out MAE:** ₹155,414
+- **Held-out R²:** 0.8840
+- **Held-out MAE:** ₹155,459
+- **90% interval:** ₹324,843 global conformal half-width; 90.02% calibration coverage
 
 ## 🎥 Demo
 
@@ -56,6 +57,8 @@ The project did not begin as a polished application. It started with a dirty sal
 The early work focused on understanding the dataset: which columns were incomplete, how salary was distributed, how inconsistent labels should be standardized, and whether skills added useful signal after role and experience were known.
 
 Once the baseline pipeline worked, I added a raw-data validation gate so schema and numeric range problems fail before cleanup can hide them. Missingness and duplicate rates are recorded as quality statistics. I then moved toward model selection: instead of choosing a model from the test set, I used cross-validation on the training data, benchmarked a small neural network, tuned the strongest boosting models with Optuna, and evaluated the selected model once on the untouched test split.
+
+After promotion, I reserved a separate calibration split and used split-conformal residuals to produce a 90% salary interval in original INR units. The final test labels were not used to choose the interval width; they are retained only for one final reporting check.
 
 The final engineering work connected the trained artifact to Streamlit and FastAPI through one shared inference path, then added validation, MLflow registry promotion, Docker, tests, linting, and GitHub Actions.
 
@@ -151,7 +154,7 @@ The project uses lightweight, model-agnostic explainability rather than treating
 
 Permutation importance on the held-out split shows that experience and job title carry the strongest signal, followed by education and location. Individual skill flags and `skill_count` contribute much less once the main career variables are already known.
 
-The registered run's sklearn MLP benchmark reached 0.8638 CV R². More patience improved it to 0.8666, and a standalone Keras ANN experiment reached 0.8753 on the local Metal GPU. The stronger neural recipe closed most of the gap but still trailed tuned CatBoost's 0.8802 by 0.0049. It was only an experiment: it did not use promotion validation, enter the registry, affect serving, or touch the final test. Stacking reached 0.8803, only 0.0001 above tuned CatBoost, so the simpler single model won under the 0.002 minimum-gain rule.
+The registered run's sklearn MLP benchmark reached 0.8659 CV R². More patience improved it to 0.8666, and a standalone Keras ANN experiment reached 0.8753 on the local Metal GPU. The stronger neural recipe still trailed tuned CatBoost's 0.8829 by 0.0076. It was only an experiment: it did not use promotion validation, enter the registry, affect serving, or touch the final test. Stacking reached 0.8830, only 0.00005 above tuned CatBoost, so the simpler single model won under the 0.002 minimum-gain rule.
 
 The ANN also has the weakest xAI story in this comparison. Dense-layer weights do not map cleanly back to salary drivers after one-hot encoding and nonlinear interactions. Model-agnostic permutation importance could still be applied, but it would be post-hoc, can divide credit across correlated inputs, and would explain associations learned by the model rather than causal salary effects. That added explanation burden was not justified without a performance gain over CatBoost.
 
@@ -165,22 +168,24 @@ Models were compared with three-fold cross-validation on a fixed 30,000-row subs
 
 | Model | Explainability | Mean CV R² |
 |---|---|---:|
-| ElasticNet | High | 0.7677 |
-| Random Forest | Medium | 0.8185 |
-| XGBoost | Medium | 0.8730 |
-| CatBoost | Medium | 0.8790 |
-| sklearn MLP | Low | 0.8638 |
+| ElasticNet | High | 0.7692 |
+| Random Forest | Medium | 0.8215 |
+| XGBoost | Medium | 0.8751 |
+| CatBoost | Medium | 0.8817 |
+| sklearn MLP | Low | 0.8659 |
 | Keras ANN | Low | 0.8753 |
-| Tuned XGBoost | Medium | 0.8775 |
-| **Tuned CatBoost** | **Medium** | **0.8802** |
-| Stacking | Low | 0.8803 |
+| Tuned XGBoost | Medium | 0.8798 |
+| **Tuned CatBoost** | **Medium** | **0.8829** |
+| Stacking | Low | 0.8830 |
 
-Stacking's raw gain over tuned CatBoost was only 0.00006 CV R², below the configured 0.002 requirement. Tuned CatBoost was promoted with validation R² 0.8812 and validation MAE ₹158,032, then evaluated once on the untouched 21,547-row final test split:
+Stacking's raw gain over tuned CatBoost was only 0.00005 CV R², below the configured 0.002 requirement. Tuned CatBoost was promoted with validation R² 0.8809 and validation MAE ₹158,264, then evaluated once on the untouched 21,547-row final test split:
 
-- **R²:** 0.8841
-- **MAE:** ₹155,414
-- **RMSE:** ₹208,545
+- **R²:** 0.8840
+- **MAE:** ₹155,459
+- **RMSE:** ₹208,608
 - **MAPE:** 10.32%
+
+The promoted model also uses a 7,757-row calibration split for a 90% split-conformal interval. Its global half-width is ₹324,843 (mean width ₹649,686), with 90.02% empirical coverage on calibration and 90.36% on the final test as reporting-only evidence. Coverage is marginal rather than guaranteed for every subgroup: calibration coverage was 85.3% for profiles with 11+ years of experience and 57.6% when experience was missing.
 
 The score is the result of one seeded training run on one public dataset and one held-out split. It should not be read as a universal salary-accuracy guarantee.
 
@@ -234,6 +239,7 @@ The goal was not to add infrastructure for its own sake. Each layer solves a pra
 - MLflow uses a local SQLite backend for model-comparison runs, candidate models, validation metrics, aliases, and artifacts.
 - Raw-data validation checks required columns, numeric ranges, missingness, and duplicate rates before cleanup. Structural errors stop training; quality warnings are retained in the final run.
 - The candidate is compared with `@champion` on a separate validation split: MAE may worsen by at most 2%, and R² may fall by at most 0.005. The final test split is reporting-only.
+- A separate calibration split supplies split-conformal residuals for a documented 90% interval; its segment coverage and width are stored in `prediction_interval.json` and model metadata.
 - A promoted candidate receives `@challenger` and `@champion`; a rejected candidate leaves the existing champion and local fallback untouched.
 - Inference loads `models:/tech-salary-advisor@champion` when MLflow and the registry are available, then falls back to `streamlit/models/` for the Docker/local artifact path.
 - The final MLflow run stores machine-readable `data_validation.json`, `lineage.json`, `promotion.json`, and model metadata artifacts.
@@ -296,7 +302,7 @@ curl http://localhost:8000/health
 curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -d "{\"job_title\":\"Data Scientist\",\"experience_years\":3,\"education\":\"Bachelor's\",\"location\":\"Bangalore\",\"skills\":[\"Python\",\"SQL\"]}"
 ```
 
-The response contains `salary_inr` and `salary_lpa`. The demo API is unauthenticated; do not expose it to sensitive data without adding authentication.
+The response contains the point estimate, interval level, lower/upper INR bounds, and corresponding LPA values. The demo API is unauthenticated; do not expose it to sensitive data without adding authentication.
 
 ## 📁 Repository anatomy
 
@@ -318,7 +324,7 @@ Tech-Salary-Advisor/
 │   ├── data.py                    # deterministic cleanup and missing indicators
 │   ├── features.py                # skill flags and skill_count
 │   ├── pipeline.py                # preprocessing and target transformation
-│   ├── evaluate.py                # regression metrics
+│   ├── evaluate.py                # regression and interval metrics
 │   ├── model_registry.py           # MLflow aliases and promotion gate
 │   ├── validate_data.py            # raw-data gate and training lineage
 │   ├── inference.py               # shared validation and prediction path

@@ -10,6 +10,7 @@ import pandas as pd
 
 from src.config import ROOT, load_config
 from src.data import clean_education, clean_job_title, clean_location
+from src.evaluate import conformal_interval
 from src.model_registry import configure_mlflow
 
 
@@ -125,3 +126,24 @@ def predict_salary_inr(job_title, experience, education, location, skills, asset
         job_title, experience, education, location, skills, metadata
     )
     return float(model.predict(row)[0])
+
+
+def predict_salary_interval(
+    job_title, experience, education, location, skills, assets=None
+):
+    """Return a salary estimate and its calibrated split-conformal interval."""
+    model, metadata = assets or load_model_assets()
+    row = build_feature_row(
+        job_title, experience, education, location, skills, metadata
+    )
+    prediction = float(model.predict(row)[0])
+    interval = metadata.get("prediction_interval")
+    if not interval:
+        raise ValueError("model metadata has no calibrated prediction interval")
+    lower, upper = conformal_interval([prediction], interval["quantile_inr"])
+    return {
+        "salary_inr": prediction,
+        "level": float(interval["level"]),
+        "lower_inr": float(lower[0]),
+        "upper_inr": float(upper[0]),
+    }

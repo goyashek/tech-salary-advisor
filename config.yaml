@@ -36,7 +36,12 @@ categorical_features:
 split:
   test_size: 0.2
   validation_size: 0.1
+  # Fraction of the post-validation training remainder reserved for intervals.
+  calibration_size: 0.1
   random_state: 42
+
+prediction_interval:
+  level: 0.9
 
 # Cap the training target to the IQR fence to stop a few extreme
 # salaries from dragging the fit. Applied to train only.

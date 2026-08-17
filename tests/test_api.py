@@ -28,6 +28,12 @@ def test_prediction_returns_inr_and_lpa():
     body = response.json()
     assert body["salary_inr"] > 0
     assert body["salary_lpa"] == round(body["salary_inr"] / 100_000, 2)
+    assert body["interval_level"] == 0.9
+    assert (
+        body["interval_lower_inr"] <= body["salary_inr"] <= body["interval_upper_inr"]
+    )
+    assert body["interval_lower_lpa"] == round(body["interval_lower_inr"] / 100_000, 2)
+    assert body["interval_upper_lpa"] == round(body["interval_upper_inr"] / 100_000, 2)
 
 
 def test_prediction_rejects_malformed_request():

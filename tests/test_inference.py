@@ -1,6 +1,10 @@
 import numpy as np
 
-from src.inference import build_feature_row, predict_salary_inr
+from src.inference import (
+    build_feature_row,
+    predict_salary_inr,
+    predict_salary_interval,
+)
 
 
 def metadata():
@@ -62,3 +66,24 @@ def test_exported_model_returns_numeric_prediction():
     )
     assert np.isfinite(prediction)
     assert prediction > 0
+
+
+def test_prediction_interval_uses_exported_conformal_width():
+    class ConstantModel:
+        def predict(self, row):
+            return np.array([1_000_000.0])
+
+    assets = (
+        ConstantModel(),
+        {**metadata(), "prediction_interval": {"level": 0.9, "quantile_inr": 100_000}},
+    )
+    result = predict_salary_interval(
+        "Data Scientist", 3, "Bachelor's", "Bangalore", ["Python"], assets
+    )
+
+    assert result == {
+        "salary_inr": 1_000_000.0,
+        "level": 0.9,
+        "lower_inr": 900_000.0,
+        "upper_inr": 1_100_000.0,
+    }

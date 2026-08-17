@@ -7,7 +7,11 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.inference import load_model_assets, predict_salary_inr
+from src.inference import (
+    load_model_assets,
+    predict_salary_inr,
+    predict_salary_interval,
+)
 
 st.set_page_config(
     page_title="Tech Salary Predictor (India)", page_icon="💼", layout="centered"
@@ -47,11 +51,11 @@ selected_skills = st.multiselect(
 st.write("")
 
 if st.button("Predict Salary"):
-    prediction = predict_salary_inr(
+    result = predict_salary_interval(
         job_title, years_exp, education, location, selected_skills, assets
     )
+    prediction = result["salary_inr"]
     lpa = prediction / 100000
-    mae_lpa = metadata["mae"] / 100000
 
     st.success("### Prediction Results")
     st.metric(
@@ -59,10 +63,10 @@ if st.button("Predict Salary"):
     )
     st.write(f"**Predicted Salary in INR**: ₹ {int(prediction):,}")
     st.write(
-        f"**Rough MAE band (not a confidence interval)**: "
-        f"₹ {(prediction - metadata['mae']):,.0f} - "
-        f"₹ {(prediction + metadata['mae']):,.0f} "
-        f"(₹ {lpa - mae_lpa:.2f} LPA - ₹ {lpa + mae_lpa:.2f} LPA)"
+        f"**{result['level']:.0%} calibrated prediction interval**: "
+        f"₹ {result['lower_inr']:,.0f} - ₹ {result['upper_inr']:,.0f} "
+        f"(₹ {result['lower_inr'] / 100000:.2f} LPA - "
+        f"₹ {result['upper_inr'] / 100000:.2f} LPA)"
     )
 
     st.write("---")
@@ -115,6 +119,8 @@ st.info(
     f"- Algorithm: {metadata['model_name']} regressor pipeline\n"
     f"- Mean Absolute Error (MAE): ₹ {metadata['mae']:,.0f} (~{mae_lpa:.2f} LPA)\n"
     f"- R² Score: {metadata['r2']:.4f}\n"
+    f"- Prediction interval: {metadata['prediction_interval']['level']:.0%} "
+    f"split-conformal interval\n"
     f"- Preprocessing: scaling + one-hot encoding via a scikit-learn Pipeline\n"
     f"- Dataset rows after dropping missing targets: {metadata['dataset_rows']:,}\n"
     f"- Training split: {metadata['training_rows']:,} rows"
