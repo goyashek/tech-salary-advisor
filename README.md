@@ -247,7 +247,7 @@ The goal was not to add infrastructure for its own sake. Each layer solves a pra
 - Streamlit uses the shared inference module for the interactive app.
 - FastAPI exposes `/health` and `/predict`.
 - Docker packages the API with pinned runtime dependencies.
-- Ruff, pre-commit, pytest, and GitHub Actions automate quality checks.
+- Ruff, pre-commit, pytest, and GitHub Actions automate quality checks, including a Docker startup and prediction smoke test.
 
 ## 🚀 Quickstart
 
@@ -336,7 +336,7 @@ Tech-Salary-Advisor/
 ├── notebooks/                     # EDA and modeling walkthroughs
 ├── tests/                         # data, model, inference, and API tests
 ├── Dockerfile                     # API runtime image
-├── .github/workflows/ci.yml       # Ruff, pytest, and Docker CI
+├── .github/workflows/ci.yml       # Ruff, pytest, Docker build, and runtime smoke CI
 ├── .pre-commit-config.yaml        # local quality hooks
 ├── requirements-api.txt           # pinned API runtime dependencies
 ├── requirements-dev.txt           # development and test dependencies

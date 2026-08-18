@@ -29,3 +29,32 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build Docker image
         run: docker build -t tech-salary-advisor .
+      - name: Smoke test Docker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker run --detach --publish 8000:8000 tech-salary-advisor)"
+          trap 'docker logs "$container_id" || true; docker rm --force "$container_id" >/dev/null || true' EXIT
+
+          curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 1 \
+            http://127.0.0.1:8000/health
+          response="$(curl --fail --silent --show-error \
+            --header 'Content-Type: application/json' \
+            --data '{"job_title":"Data Scientist","experience_years":3,"education":"btech","location":"Bangalore","skills":["Python","SQL"]}' \
+            http://127.0.0.1:8000/predict)"
+
+          python - "$response" <<'PY'
+          import json
+          import sys
+
+          body = json.loads(sys.argv[1])
+          required = {
+              "salary_inr",
+              "interval_level",
+              "interval_lower_inr",
+              "interval_upper_inr",
+          }
+          assert required <= body.keys()
+          assert body["interval_level"] == 0.9
+          assert body["interval_lower_inr"] <= body["salary_inr"] <= body["interval_upper_inr"]
+          PY
