@@ -58,60 +58,31 @@ https://github.com/user-attachments/assets/083a9a14-1558-471b-80e6-3212f90118ab
 
 ## System architecture
 
-The platform follows a modular architecture where data validation, pipeline transformations, model registry checks, and serving layers are decoupled but share the same feature contract.
+The platform enforces automated quality gates across data validation, model promotion, and containerized deployment.
 
 ```mermaid
-flowchart TD
-    subgraph DataLayer["1. Data & Validation Gate"]
-        A[Raw Kaggle CSV] --> B[Data Validation Gate\nsrc/validate_data.py]
-        B -->|Structural Errors| B1[Fail Training]
-        B -->|Passed Checks| C[Deterministic Cleaning\nsrc/data.py]
-        C --> D[Feature Engineering\nsrc/features.py]
-    end
+flowchart LR
+    A["Raw Data\n(Kaggle)"] --> G1{"Gate 1:\nSchema & Range"}
+    G1 -->|PASS| B["Leakage-Free\nPipeline & CV"]
+    B --> C["Optuna Tuning &\nStacking Check"]
+    C --> G2{"Gate 2:\nValidation Gate"}
+    G2 -->|PROMOTE| D["MLflow Registry\n(@champion)"]
+    D --> E["Shared Inference\n(+ 90% Interval)"]
+    E --> G3{"Gate 3:\nDocker CI Smoke"}
+    G3 -->|PASS| F["Live Serving\n(Streamlit & FastAPI)"]
 
-    subgraph SplitLayer["2. Data Partitioning & Isolation"]
-        D -->|80/20 Split| E1[Held-out Test Split\n21,547 rows - Reporting Only]
-        D -->|Training Pool| E2[Training Split\n86,188 rows]
-        E2 --> E2a[Fit Split: 69,812 rows\nIQR Target Capped]
-        E2 --> E2b[Promotion Split: 8,619 rows]
-        E2 --> E2c[Calibration Split: 7,757 rows]
-    end
-
-    subgraph ModelLayer["3. Pipeline & Optimization"]
-        E2a --> F[Scikit-Learn Pipeline\nMedian/Mode Imputation + OneHot + log1p]
-        F --> G[Multi-Model Comparison\nElasticNet, RF, XGB, CB, MLP, Keras]
-        G --> H[Optuna Bayesian Search\n3-Fold CV on 30k subset]
-        H --> I[Complexity-Gated Stacking\nMin Gain Rule: Delta R2 >= 0.002]
-    end
-
-    subgraph RegistryLayer["4. MLflow Registry & Uncertainty"]
-        I --> J[Candidate Pipeline]
-        J --> K[Validation Promotion Gate\nsrc/model_registry.py]
-        K -->|Meets Thresholds| L1[Assign @champion Alias]
-        K -->|Fails Gate| L2[Retain Existing Champion]
-        E2c --> M[Split-Conformal Calibration\n90% Salary Interval in INR]
-    end
-
-    subgraph ServingLayer["5. Dual Serving & Containerization"]
-        L1 & M --> N[Shared Inference Module\nsrc/inference.py]
-        N --> O1[Streamlit Web App\nSalary Curves & Counterfactuals]
-        N --> O2[FastAPI Microservice\nTyped Pydantic /predict & /health]
-        O2 --> P[Docker Container\nGitHub Actions CI Smoke Test]
-    end
-
-    style B1 fill:#ffcccc,stroke:#ff0000,stroke-width:1px
-    style L1 fill:#ccffcc,stroke:#00aa00,stroke-width:1px
-    style L2 fill:#fff3cd,stroke:#ffaa00,stroke-width:1px
-    style E1 fill:#e6f2ff,stroke:#0066cc,stroke-width:1px
+    style G1 fill:#fee2e2,stroke:#ef4444,stroke-width:1.5px
+    style G2 fill:#fef3c7,stroke:#f59e0b,stroke-width:1.5px
+    style G3 fill:#e0e7ff,stroke:#6366f1,stroke-width:1.5px
+    style D fill:#dcfce7,stroke:#22c55e,stroke-width:1.5px
+    style F fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px
 ```
 
-### Architectural stages
+### Automated quality gates
 
-1. **Data ingestion and contract validation**: Checks schema integrity, numeric boundaries (experience between 0 and 100, positive salaries), and missingness before data cleaning begins.
-2. **Leakage-safe partitioning**: Splits raw data into training, validation, calibration, and test subsets. Imputation statistics and target outlier bounds are computed strictly on training data.
-3. **Pipeline assembly and model search**: Encapsulates preprocessing and target transformation inside a `TransformedTargetRegressor(func=np.log1p)`. Evaluates linear, tree-based, and neural models with 3-fold cross-validation.
-4. **Promotion gate and uncertainty calibration**: Evaluates the candidate against the current `@champion` in a local SQLite MLflow registry. Computes non-parametric 90% prediction intervals on the calibration split.
-5. **Shared inference and dual serving**: Powers both the Streamlit frontend and FastAPI REST API using identical validation and feature assembly code, tested inside a Docker container during CI.
+* **Gate 1 (Schema and data quality)**: Validates required columns, non-negative values, and missingness before data preprocessing runs.
+* **Gate 2 (Champion-challenger promotion)**: Compares candidates against the current champion on an isolated validation split (MAE within 2%, R² drop at most 0.005) before assigning the `@champion` alias in MLflow.
+* **Gate 3 (Runtime container verification)**: Launches the built Docker container in GitHub Actions and verifies that `/health` and `/predict` respond with valid schema payloads before PR merges.
 
 ---
 
