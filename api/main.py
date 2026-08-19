@@ -11,9 +11,7 @@ app = FastAPI(title="Tech Salary Advisor API")
 
 class SalaryProfile(BaseModel):
     job_title: str
-    experience_years: float = Field(
-        ge=0, le=MAX_EXPERIENCE_YEARS, allow_inf_nan=False
-    )
+    experience_years: float = Field(ge=0, le=MAX_EXPERIENCE_YEARS, allow_inf_nan=False)
     education: str
     location: str
     skills: list[str] = Field(default_factory=list)
