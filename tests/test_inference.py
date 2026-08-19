@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from src.inference import (
     build_feature_row,
@@ -58,6 +59,35 @@ def test_build_feature_row_rejects_unknown_skill():
         assert "unsupported skill" in str(exc)
     else:
         raise AssertionError("unknown skills should be rejected")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("job_title", "Mystery Role"),
+        ("education", "Unlisted Degree"),
+        ("location", "Kolkata"),
+    ],
+)
+def test_build_feature_row_rejects_unknown_categories(field, value):
+    profile = {
+        "job_title": "Data Scientist",
+        "experience": 3,
+        "education": "Bachelor's",
+        "location": "Bangalore",
+        "skills": [],
+    }
+    profile[field] = value
+
+    with pytest.raises(ValueError):
+        build_feature_row(**profile, metadata=metadata())
+
+
+def test_build_feature_row_rejects_experience_over_contract():
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        build_feature_row(
+            "Data Scientist", 101, "Bachelor's", "Bangalore", [], metadata()
+        )
 
 
 def test_exported_model_returns_numeric_prediction():

@@ -12,6 +12,7 @@ from src.inference import (
     predict_salary_inr,
     predict_salary_interval,
 )
+from src.validate_data import MAX_EXPERIENCE_YEARS
 
 st.set_page_config(
     page_title="Tech Salary Predictor (India)", page_icon="💼", layout="centered"
@@ -40,7 +41,11 @@ job_title = st.selectbox(
     "Job Title", metadata["job_titles"], index=4
 )  # Default to Data Scientist
 years_exp = st.slider(
-    "Years of Experience", min_value=0.0, max_value=20.0, value=3.0, step=0.5
+    "Years of Experience",
+    min_value=0.0,
+    max_value=float(MAX_EXPERIENCE_YEARS),
+    value=3.0,
+    step=0.5,
 )
 education = st.selectbox("Education Level", metadata["education_levels"])
 location = st.selectbox("Location / City", metadata["locations"])

@@ -55,3 +55,18 @@ def test_prediction_rejects_unknown_skill():
     )
 
     assert response.status_code == 422
+
+
+def test_prediction_rejects_experience_over_contract():
+    response = client.post(
+        "/predict",
+        json={
+            "job_title": "Data Scientist",
+            "experience_years": 101,
+            "education": "Bachelor's",
+            "location": "Bangalore",
+            "skills": [],
+        },
+    )
+
+    assert response.status_code == 422

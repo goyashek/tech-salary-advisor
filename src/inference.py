@@ -12,6 +12,7 @@ from src.config import ROOT, load_config
 from src.data import clean_education, clean_job_title, clean_location
 from src.evaluate import conformal_interval
 from src.model_registry import configure_mlflow
+from src.validate_data import MAX_EXPERIENCE_YEARS
 
 
 def _load_registry_assets(cfg):
@@ -65,10 +66,14 @@ def load_model_assets(model_path=None, metadata_path=None):
 def _category(value, cleaner, allowed, field):
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
-    value = cleaner(value)
-    if value not in allowed:
-        raise ValueError(f"unsupported {field}: {value}")
-    return value
+    lookup = {item.casefold(): item for item in allowed}
+    normalized = value.strip().casefold()
+    if normalized in lookup:
+        return lookup[normalized]
+    cleaned = cleaner(value, strict=True)
+    if not isinstance(cleaned, str) or cleaned.casefold() not in lookup:
+        raise ValueError(f"unsupported {field}: {value.strip()}")
+    return lookup[cleaned.casefold()]
 
 
 def _skills(values, allowed):
@@ -90,9 +95,13 @@ def build_feature_row(job_title, experience, education, location, skills, metada
     try:
         experience = float(experience)
     except (TypeError, ValueError) as exc:
-        raise ValueError("experience must be a finite, non-negative number") from exc
-    if not np.isfinite(experience) or experience < 0:
-        raise ValueError("experience must be a finite, non-negative number")
+        raise ValueError(
+            f"experience must be a finite number between 0 and {MAX_EXPERIENCE_YEARS}"
+        ) from exc
+    if not np.isfinite(experience) or not 0 <= experience <= MAX_EXPERIENCE_YEARS:
+        raise ValueError(
+            f"experience must be a finite number between 0 and {MAX_EXPERIENCE_YEARS}"
+        )
 
     job_title = _category(
         job_title, clean_job_title, metadata["job_titles"], "job title"

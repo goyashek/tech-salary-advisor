@@ -4,13 +4,16 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from src.inference import predict_salary_interval
+from src.validate_data import MAX_EXPERIENCE_YEARS
 
 app = FastAPI(title="Tech Salary Advisor API")
 
 
 class SalaryProfile(BaseModel):
     job_title: str
-    experience_years: float = Field(ge=0, allow_inf_nan=False)
+    experience_years: float = Field(
+        ge=0, le=MAX_EXPERIENCE_YEARS, allow_inf_nan=False
+    )
     education: str
     location: str
     skills: list[str] = Field(default_factory=list)

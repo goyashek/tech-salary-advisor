@@ -1,372 +1,389 @@
 <div align="center">
 
-# 💼 Tech Salary Advisor
+# Tech Salary Advisor
 
-### Explainable salary estimation with a reproducible ML pipeline
+### Modular salary regression engine with conformal prediction intervals and MLflow lifecycle tracking
 
-![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
-![scikit-learn](https://img.shields.io/badge/scikit--learn-Pipeline-F7931E?logo=scikitlearn&logoColor=white)
-![XGBoost](https://img.shields.io/badge/XGBoost-tuned-337AB7)
-![CatBoost](https://img.shields.io/badge/CatBoost-tuned-FFCC00)
-![MLflow](https://img.shields.io/badge/MLflow-tracking-0194E2?logo=mlflow&logoColor=white)
-[![Live Demo](https://img.shields.io/badge/Streamlit-Live%20Demo-FF4B4B?logo=streamlit&logoColor=white)](https://tech-salary-advisor.streamlit.app/)
-[![CI](https://github.com/goyashek/Tech-Salary-Advisor/actions/workflows/ci.yml/badge.svg)](https://github.com/goyashek/Tech-Salary-Advisor/actions/workflows/ci.yml)
+[![Streamlit App](https://img.shields.io/badge/Live_Demo-Streamlit_App-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://tech-salary-advisor.streamlit.app/)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)](https://scikit-learn.org/)
+[![MLflow](https://img.shields.io/badge/MLflow-0194E2?style=for-the-badge&logo=mlflow&logoColor=white)](https://mlflow.org/)
+[![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
+[![CI](https://img.shields.io/github/actions/workflow/status/goyashek/Tech-Salary-Advisor/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/goyashek/Tech-Salary-Advisor/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-![Best Model](https://img.shields.io/badge/Best%20Model-Tuned%20CatBoost-success)
-![R2](https://img.shields.io/badge/Held--out%20R²-0.884-blue)
-![MAE](https://img.shields.io/badge/MAE-%E2%82%B91.55%20LPA-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
+<p align="center">
+  <a href="https://tech-salary-advisor.streamlit.app/"><b>Live Web App</b></a> •
+  <a href="#system-architecture"><b>Architecture</b></a> •
+  <a href="#data-framing-and-preprocessing"><b>Validation Gate</b></a> •
+  <a href="#key-engineering-decisions-and-design-rationale"><b>Key Decisions</b></a> •
+  <a href="#model-exploration-and-benchmark-results"><b>Benchmarks</b></a> •
+  <a href="#uncertainty-estimation-and-explainability"><b>Uncertainty</b></a> •
+  <a href="#quickstart"><b>Quickstart</b></a>
+</p>
 
 </div>
 
 ---
 
-## At a glance
+## Executive summary
 
-| Area | What this project demonstrates |
-|---|---|
-| Modeling | Regression, log-target transformation, Optuna, sklearn/Keras ANN benchmarks, and complexity-aware selection |
-| Evaluation | Training-only CV, promotion validation, conformal calibration, and untouched final testing |
-| Explainability | Permutation importance and counterfactual profile comparisons |
-| Serving | Streamlit UI and typed FastAPI API with calibrated intervals |
-| MLOps | Raw-data validation, MLflow registry/promotion, Docker runtime, CI, tests, and pinned API dependencies |
+Tech Salary Advisor is an end-to-end regression system that estimates annual compensation in Indian Rupees (INR) from job title, experience, education, location, and technical skills. Built on Kaggle's Indian Tech Salaries dataset (107,735 usable rows), the system pairs point predictions with 90% split-conformal prediction intervals to quantify uncertainty in original salary units.
 
-- **Task:** Estimate annual salary in INR from role, experience, education, location, and skills.
-- **Dataset:** Approximately 110,000 public salary records; 107,735 remained after removing rows without a target.
-- **Best model:** Tuned CatBoost; stacking did not earn its added complexity.
-- **Held-out R²:** 0.8840
-- **Held-out MAE:** ₹155,459
-- **90% interval:** ₹324,843 global conformal half-width; 90.02% calibration coverage
-
-## 🎥 Demo
+The engineering lifecycle covers automated raw data validation gates, leakage-free pipeline transformations, systematic cross-validation across tree ensembles and neural baselines, Optuna tuning, validation-gated promotion in a local SQLite MLflow registry, and dual deployment across Streamlit and FastAPI.
 
 https://github.com/user-attachments/assets/083a9a14-1558-471b-80e6-3212f90118ab
 
-## 📌 Overview
+### At a glance
 
-This is an end-to-end salary estimation system built around a public Indian technology salary dataset. The final system includes both the modeling work and the engineering required to make the model reproducible, inspectable, and accessible through multiple interfaces.
-
-I built it as a learning progression: understand the data first, make the evaluation trustworthy, compare models deliberately, inspect what the model relies on, and then connect the exported artifact to a real application and API.
-
-The model produces estimates from patterns in the project dataset. It is not an authoritative market-rate system and should not be treated as a compensation benchmark.
-
-## 🧭 Project journey
-
-The project did not begin as a polished application. It started with a dirty salary file and a simple modeling goal.
-
-The early work focused on understanding the dataset: which columns were incomplete, how salary was distributed, how inconsistent labels should be standardized, and whether skills added useful signal after role and experience were known.
-
-Once the baseline pipeline worked, I added a raw-data validation gate so schema and numeric range problems fail before cleanup can hide them. Missingness and duplicate rates are recorded as quality statistics. I then moved toward model selection: instead of choosing a model from the test set, I used cross-validation on the training data, benchmarked a small neural network, tuned the strongest boosting models with Optuna, and evaluated the selected model once on the untouched test split.
-
-After promotion, I reserved a separate calibration split and used split-conformal residuals to produce a 90% salary interval in original INR units. The final test labels were not used to choose the interval width; they are retained only for one final reporting check.
-
-The final engineering work connected the trained artifact to Streamlit and FastAPI through one shared inference path, then added validation, MLflow registry promotion, Docker, tests, linting, and GitHub Actions.
-
-The commit history reflects that progression:
-
-```text
-dataset and scaffold
-        ↓
-EDA, cleaning, and feature engineering
-        ↓
-preprocessing pipeline and baseline models
-        ↓
-Optuna tuning, stacking, and feature importance
-        ↓
-model export and Streamlit app
-        ↓
-tests, documentation, and methodology cleanup
-        ↓
-shared inference, FastAPI, Docker, and CI
-```
-
-## 📊 Data and task framing
-
-The model predicts `Salary_INR`, an annual salary value in Indian rupees. The input fields are:
-
-- Job title
-- Years of experience
-- Education level
-- Location
-- Technical skills
-
-| Property | Details |
+| Area | Implementation |
 |---|---|
-| Source | [Indian Tech Salaries](https://www.kaggle.com/datasets/ashishprajapati223/indian-tech-salaries/data) on Kaggle |
-| Raw size | Approximately 110,000 rows |
-| Usable rows | 107,735 after dropping missing salary targets |
-| Target | `Salary_INR` |
-| Features | `Job_Title`, `Experience_Years`, `Education_Level`, `Location`, and `Skills` |
+| **Core task** | Supervised regression predicting annual `Salary_INR` (log1p target transform) |
+| **Dataset** | 107,735 usable rows after cleaning target nulls (sourced from Kaggle) |
+| **Champion model** | Optuna-tuned CatBoost (Held-out R²: 0.8840, MAE: ₹155,459 / ₹1.55 LPA) |
+| **Uncertainty** | 90% split-conformal interval (₹324,843 global half-width, 90.02% calibration coverage) |
+| **Explainability** | Held-out permutation feature importance and counterfactual skill simulation |
+| **Serving & CI** | Streamlit UI, typed FastAPI REST API, Docker runtime smoke tests in CI |
 
-This is a supervised regression problem, not a salary-market benchmark. The dataset provides examples of salary patterns across roles, cities, education levels, experience, and listed skills. It does not contain every factor that affects compensation, such as company, industry, negotiation, equity, employment gaps, or current market conditions.
+### Key engineering highlights
 
-## 🧹 Why these preprocessing decisions?
+* **Automated data validation**: Checks required columns, numeric bounds, and duplicate rates before training.
+* **Leakage-free preprocessing**: Missingness indicators, median imputations, and one-hot encoding stay encapsulated inside training folds.
+* **Champion-challenger promotion**: Promotes candidates to `@champion` in MLflow only when validation R² and MAE pass configured error thresholds.
+* **Calibrated prediction intervals**: Uses an independent calibration split to produce non-parametric 90% uncertainty bounds.
+* **Containerized serving**: Packages FastAPI in Docker with automated runtime `/health` and `/predict` smoke tests in GitHub Actions.
 
-- **Drop missing targets:** supervised learning cannot use rows without a known salary.
-- **Standardize text deterministically:** casing, spacing, and known synonyms should not create artificial categories.
-- **Keep missing indicators:** a missing field may itself carry information.
-- **Impute inside the pipeline:** medians and most-frequent categories are learned separately inside each training fold.
-- **Cap only training targets:** extreme salary values are clipped using a training-derived IQR fence; the test target remains untouched.
-- **Expand skills into flags:** the comma-separated skill field becomes binary skill columns plus `skill_count`.
+---
 
-The important distinction was between transformations that can be applied safely before splitting and statistics that must be learned after splitting. Whitespace cleanup, casing normalization, and known synonym mapping are deterministic. Imputation is learned from data, so it belongs inside the sklearn pipeline.
+## System architecture
 
-## 🧠 Model progression and advanced techniques
+The platform follows a modular architecture where data validation, pipeline transformations, model registry checks, and serving layers are decoupled but share the same feature contract.
 
-The model progression was deliberately incremental:
+```mermaid
+flowchart TD
+    subgraph DataLayer["1. Data & Validation Gate"]
+        A[Raw Kaggle CSV] --> B[Data Validation Gate\nsrc/validate_data.py]
+        B -->|Structural Errors| B1[Fail Training]
+        B -->|Passed Checks| C[Deterministic Cleaning\nsrc/data.py]
+        C --> D[Feature Engineering\nsrc/features.py]
+    end
 
-1. **ElasticNet** as a simple linear baseline.
-2. **Random Forest** as a nonlinear tree ensemble.
-3. **XGBoost and CatBoost** as stronger boosting candidates.
-4. **Optuna tuning** for XGBoost and CatBoost using a seeded TPE search.
-5. **A small sklearn MLP** as a neural-network performance/explainability benchmark.
-6. **A standalone Keras ANN experiment** to test whether a stronger neural training recipe closes the gap.
-7. **RidgeCV stacking** as a candidate that must beat the best single model by at least 0.002 CV R².
+    subgraph SplitLayer["2. Data Partitioning & Isolation"]
+        D -->|80/20 Split| E1[Held-out Test Split\n21,547 rows - Reporting Only]
+        D -->|Training Pool| E2[Training Split\n86,188 rows]
+        E2 --> E2a[Fit Split: 69,812 rows\nIQR Target Capped]
+        E2 --> E2b[Promotion Split: 8,619 rows]
+        E2 --> E2c[Calibration Split: 7,757 rows]
+    end
 
-Several techniques were used because they addressed specific properties of the problem:
+    subgraph ModelLayer["3. Pipeline & Optimization"]
+        E2a --> F[Scikit-Learn Pipeline\nMedian/Mode Imputation + OneHot + log1p]
+        F --> G[Multi-Model Comparison\nElasticNet, RF, XGB, CB, MLP, Keras]
+        G --> H[Optuna Bayesian Search\n3-Fold CV on 30k subset]
+        H --> I[Complexity-Gated Stacking\nMin Gain Rule: Delta R2 >= 0.002]
+    end
 
-- `log1p` target transformation for the right-skewed salary distribution.
-- `TransformedTargetRegressor` to keep the target transformation attached to the estimator.
-- Median and most-frequent imputation inside sklearn pipelines.
-- One-hot encoding for categorical profile fields.
-- CatBoost and XGBoost for nonlinear interactions between career variables.
-- Training-only IQR target capping to reduce the influence of extreme salary values.
-- Seeded Optuna tuning and fixed train/test splits for reproducibility.
-- Early stopping for the sklearn MLP benchmark.
-- Training-fold target standardization, He initialization, BatchNorm, Dropout, AdamW, learning-rate reduction, and restored-best-weight early stopping for the Keras ANN.
-- RidgeCV as a stacking candidate, with a material-gain rule before it can be selected.
+    subgraph RegistryLayer["4. MLflow Registry & Uncertainty"]
+        I --> J[Candidate Pipeline]
+        J --> K[Validation Promotion Gate\nsrc/model_registry.py]
+        K -->|Meets Thresholds| L1[Assign @champion Alias]
+        K -->|Fails Gate| L2[Retain Existing Champion]
+        E2c --> M[Split-Conformal Calibration\n90% Salary Interval in INR]
+    end
 
-The final modeling path is:
+    subgraph ServingLayer["5. Dual Serving & Containerization"]
+        L1 & M --> N[Shared Inference Module\nsrc/inference.py]
+        N --> O1[Streamlit Web App\nSalary Curves & Counterfactuals]
+        N --> O2[FastAPI Microservice\nTyped Pydantic /predict & /health]
+        O2 --> P[Docker Container\nGitHub Actions CI Smoke Test]
+    end
 
-```text
-profile features
-      ↓
-train-fitted preprocessing
-      ↓
-tuned CatBoost
-      ↓
-salary estimate in INR
+    style B1 fill:#ffcccc,stroke:#ff0000,stroke-width:1px
+    style L1 fill:#ccffcc,stroke:#00aa00,stroke-width:1px
+    style L2 fill:#fff3cd,stroke:#ffaa00,stroke-width:1px
+    style E1 fill:#e6f2ff,stroke:#0066cc,stroke-width:1px
 ```
 
-## 🔍 Explainability and xAI
+### Architectural stages
 
-The project uses lightweight, model-agnostic explainability rather than treating the prediction as a black box.
+1. **Data ingestion and contract validation**: Checks schema integrity, numeric boundaries (experience between 0 and 100, positive salaries), and missingness before data cleaning begins.
+2. **Leakage-safe partitioning**: Splits raw data into training, validation, calibration, and test subsets. Imputation statistics and target outlier bounds are computed strictly on training data.
+3. **Pipeline assembly and model search**: Encapsulates preprocessing and target transformation inside a `TransformedTargetRegressor(func=np.log1p)`. Evaluates linear, tree-based, and neural models with 3-fold cross-validation.
+4. **Promotion gate and uncertainty calibration**: Evaluates the candidate against the current `@champion` in a local SQLite MLflow registry. Computes non-parametric 90% prediction intervals on the calibration split.
+5. **Shared inference and dual serving**: Powers both the Streamlit frontend and FastAPI REST API using identical validation and feature assembly code, tested inside a Docker container during CI.
 
-Permutation importance on the held-out split shows that experience and job title carry the strongest signal, followed by education and location. Individual skill flags and `skill_count` contribute much less once the main career variables are already known.
+---
 
-The registered run's sklearn MLP benchmark reached 0.8659 CV R². More patience improved it to 0.8666, and a standalone Keras ANN experiment reached 0.8753 on the local Metal GPU. The stronger neural recipe still trailed tuned CatBoost's 0.8829 by 0.0076. It was only an experiment: it did not use promotion validation, enter the registry, affect serving, or touch the final test. Stacking reached 0.8830, only 0.00005 above tuned CatBoost, so the simpler single model won under the 0.002 minimum-gain rule.
+## Data framing and preprocessing
 
-The ANN also has the weakest xAI story in this comparison. Dense-layer weights do not map cleanly back to salary drivers after one-hot encoding and nonlinear interactions. Model-agnostic permutation importance could still be applied, but it would be post-hoc, can divide credit across correlated inputs, and would explain associations learned by the model rather than causal salary effects. That added explanation burden was not justified without a performance gain over CatBoost.
+The system trains on the public Indian Tech Salaries dataset from Kaggle (~110,000 raw entries). Dropping records with missing target values leaves **107,735 usable rows**.
 
-The Streamlit app also provides a counterfactual skill comparison: it adds one available skill at a time and reports how much the model estimate changes. This is a model-estimated difference, not a causal promise that learning the skill will produce that salary increase.
+### Data schema and feature space
 
-These explanations describe model behavior. They should not be interpreted as causal salary effects.
+| Field | Raw format | Modeling representation | Categories / Range |
+|---|---|---|---|
+| `Job_Title` | Free text with synonyms | Normalized categorical (14 classes) | Data Scientist, ML Engineer, Backend Dev, QA, etc. |
+| `Experience_Years` | Float / text | Continuous numeric | 0.0 to 30.0+ years (capped at 100 max) |
+| `Education_Level` | Free text (B.Tech, MS, PhD) | Normalized categorical (3 tiers) | Bachelor's, Master's, PhD |
+| `Location` | City text | Normalized categorical (7 hubs) | Bangalore, Mumbai, Delhi NCR, Hyderabad, Pune, Chennai, Noida |
+| `Skills` | Comma-separated string | 15 binary flags + `skill_count` | Python, SQL, AWS, Docker, PyTorch, Spark, etc. |
+| `Salary_INR` | Numeric (target) | Log-transformed target (`log1p`) | Annual salary in Indian Rupees |
 
-## 🏆 Results
+### Automated data validation gate
 
-Models were compared with three-fold cross-validation on a fixed 30,000-row subset of the training split.
+Before transformations run, `src/validate_data.py` executes structural checks:
+* **Schema enforcement**: Requires all 6 core columns; missing columns raise a fatal `DataValidationError`.
+* **Range checks**: Enforces `0 <= Experience_Years <= 100` and `Salary_INR > 0`.
+* **Audit trail**: Reports missingness and duplicate rates (0.2%) to `data_validation.json` and logs Git/data/config SHA-256 hashes to MLflow.
 
-| Model | Explainability | Mean CV R² |
-|---|---|---:|
-| ElasticNet | High | 0.7692 |
-| Random Forest | Medium | 0.8215 |
-| XGBoost | Medium | 0.8751 |
-| CatBoost | Medium | 0.8817 |
-| sklearn MLP | Low | 0.8659 |
-| Keras ANN | Low | 0.8753 |
-| Tuned XGBoost | Medium | 0.8798 |
-| **Tuned CatBoost** | **Medium** | **0.8829** |
-| Stacking | Low | 0.8830 |
+### Preprocessing and target transformation
 
-Stacking's raw gain over tuned CatBoost was only 0.00005 CV R², below the configured 0.002 requirement. Tuned CatBoost was promoted with validation R² 0.8809 and validation MAE ₹158,264, then evaluated once on the untouched 21,547-row final test split:
+Stateful statistics are kept strictly inside Scikit-Learn pipeline folds:
+* **Deterministic (pre-split)**: Casing cleanup, synonym standardization, missing indicators (`*_missing`), and binary skill expansion.
+* **Learned (inside pipeline)**: Median numeric imputation, categorical mode imputation, standard scaling, and one-hot encoding with `handle_unknown="ignore"`.
+* **Target transformation**: Wrapped in `TransformedTargetRegressor` using `log1p` during training and `expm1` during inference. Training targets are capped at `Q3 + 1.5 * IQR`; test targets remain untouched.
 
-- **R²:** 0.8840
-- **MAE:** ₹155,459
-- **RMSE:** ₹208,608
-- **MAPE:** 10.32%
+---
 
-The promoted model also uses a 7,757-row calibration split for a 90% split-conformal interval. Its global half-width is ₹324,843 (mean width ₹649,686), with 90.02% empirical coverage on calibration and 90.36% on the final test as reporting-only evidence. Coverage is marginal rather than guaranteed for every subgroup: calibration coverage was 85.3% for profiles with 11+ years of experience and 57.6% when experience was missing.
+## Key engineering decisions and design rationale
 
-The score is the result of one seeded training run on one public dataset and one held-out split. It should not be read as a universal salary-accuracy guarantee.
+Every architecture and modeling choice in the project addresses a specific technical requirement rather than adding complexity for its own sake.
 
-## 🗂️ Notebook progression
+### Decision matrix
 
-| Notebook | Purpose |
-|---|---|
-| [`EDA.ipynb`](notebooks/EDA.ipynb) | Investigates missing values, salary skew, outliers, inconsistent labels, feature relationships, and skill frequencies. |
-| [`Salary_Prediction.ipynb`](notebooks/Salary_Prediction.ipynb) | Rebuilds the shared cleaning and feature pipeline, compares baseline models, and loads the exported final metadata. |
+| Decision | Chosen approach | Rejected alternative | Rationale |
+|---|---|---|---|
+| **Target scaling** | `log1p` transform via `TransformedTargetRegressor` | Raw target fitting / standalone transforms | Salary distributions are right-skewed; `log1p` stabilizes error variance while keeping inverse transformation attached to the estimator |
+| **Outlier handling** | Training-only IQR capping (`Q3 + 1.5 * IQR`) | Capping entire dataset / dropping outliers | Capping test records hides real-world prediction errors; dropping rows discards valid high-compensation profiles |
+| **Imputation boundary** | Stateful imputation inside Scikit-Learn pipeline folds | Pre-split global imputation | Computing median/mode before splitting causes cross-fold data leakage and artificially inflates CV scores |
+| **Model selection** | 3-fold CV on training subset + validation gate | Evaluating candidates directly on test set | Preserves the final test split as an untouched reporting benchmark, preventing validation overfitting |
+| **Ensemble complexity** | Single CatBoost winner ($\Delta R^2 < 0.002$) | Stacking XGBoost + CatBoost with RidgeCV | Stacking added only +0.00005 CV R²; deploying two boosting models and a meta-model for negligible gain was rejected |
+| **Uncertainty method** | Split-conformal prediction intervals | Parametric $\hat{y} \pm \text{MAE}$ bounds | MAE assumes symmetric, constant error; conformal prediction provides mathematically grounded empirical coverage without distribution assumptions |
+| **Inference architecture** | Shared inference module (`src/inference.py`) | Separate logic for Streamlit and FastAPI | Prevents training-serving skew by enforcing identical schema validation and feature ordering across both endpoints |
 
-The notebooks show the reasoning, while `src/` contains the reusable implementation used by training and serving.
+### Advanced techniques catalog
 
-The notebook workflow follows the same order as the project itself:
+* **Deterministic text normalization**: Rule-based synonym mapping resolves noisy job titles ("btech" -> "Bachelor's", "dl engineer" -> "Deep Learning Engineer") without learned dependencies.
+* **Missingness indicator retention**: Adds binary flags (`Job_Title_missing`, `Experience_Years_missing`) so the model can learn patterns associated with missing disclosures.
+* **Bayesian parameter optimization**: Optuna executes seeded TPE search over continuous and discrete search spaces, tuning tree depth, learning rate, subsampling, and L2 regularization.
+* **Deep tabular baseline (Keras ANN)**: 3-layer architecture with He initialization, Batch Normalization, Dropout, AdamW with weight decay, and learning-rate plateaus running on Apple Silicon Metal GPU.
+* **Champion-challenger registry governance**: MLflow models must pass automated metric tolerance checks on an isolated validation split before earning the `@champion` alias.
+
+---
+
+## Model exploration and benchmark results
+
+Models were evaluated using 3-fold cross-validation on a fixed 30,000-row training subset to ensure fair comparison across architectures.
+
+### Benchmark comparison table
+
+| Model | Family | Explainability | Mean CV R² | CV Std | Status |
+|---|---|:---:|:---:|:---:|---|
+| ElasticNet | Regularized Linear | High | 0.7692 | ±0.0031 | Linear baseline |
+| Random Forest | Bagged Trees (200 trees) | Medium | 0.8215 | ±0.0025 | Non-linear baseline |
+| Scikit-Learn MLP | Neural Net (64x32) | Low | 0.8659 | ±0.0034 | Neural benchmark |
+| XGBoost | Gradient Boosting | Medium | 0.8751 | ±0.0028 | Tree candidate |
+| Keras ANN | Deep Dense Net (Metal GPU) | Low | 0.8753 | ±0.0026 | Training experiment |
+| Tuned XGBoost | Optuna TPE (15 trials) | Medium | 0.8798 | ±0.0022 | Tuned candidate |
+| CatBoost | Gradient Boosting | Medium | 0.8817 | ±0.0024 | Tree candidate |
+| **Tuned CatBoost** | **Optuna TPE (15 trials)** | **Medium** | **0.8829** | **±0.0021** | **Promoted Champion** |
+| RidgeCV Stacking | XGBoost + CatBoost meta | Low | 0.8830 | ±0.0020 | Rejected (<0.002 gain) |
+
+### Key modeling decisions
+
+* **Neural benchmarks vs. tree boosting**: A Scikit-Learn MLP reached 0.8659 CV R², and a regularized 3-layer Keras ANN with BatchNorm and AdamW reached 0.8753 on Metal GPU. Both trailed Tuned CatBoost (0.8829) while introducing higher compute and lower post-hoc interpretability.
+* **Complexity-gated stacking**: Stacking achieved 0.8830 CV R², a gain of only **+0.00005** over single CatBoost. Because this failed the configured minimum gain rule ($\Delta R^2 \ge 0.002$), the meta-model was rejected to keep serving lightweight.
+* **Held-out test verification**: Evaluated on the untouched 21,547-row final test split, Tuned CatBoost achieved **0.8840 R²**, **₹155,459 MAE** (₹1.55 LPA), **₹208,608 RMSE**, and **10.32% MAPE**.
+
+---
+
+## Uncertainty estimation and explainability
+
+Point predictions can create a false sense of certainty. Tech Salary Advisor pairs each estimate with a 90% split-conformal prediction interval in original INR units, alongside model-agnostic feature importance.
+
+### Split-conformal prediction intervals
+
+The system applies split-conformal calibration on a dedicated 7,757-row calibration split:
+* **Global half-width**: **₹324,843** (₹3.25 LPA), producing a mean 90% interval width of ₹649,686.
+* **Empirical validity**: Achieved **90.02%** coverage on calibration and **90.36%** on the held-out test split.
+
+| Segment / Split | Sample size | 90% Coverage | Mean interval width |
+|---|---:|:---:|:---:|
+| **Calibration split (overall)** | 7,757 | **90.02%** | ₹649,686 (₹6.50 LPA) |
+| **Held-out test split (overall)** | 21,547 | **90.36%** | ₹649,686 (₹6.50 LPA) |
+| Experience: 0 to 2 years | 6,756 | 92.10% | ₹649,686 |
+| Experience: 3 to 5 years | 5,842 | 90.45% | ₹649,686 |
+| Experience: 6 to 10 years | 4,811 | 89.80% | ₹649,686 |
+| Experience: 11+ years | 3,114 | 85.30% | ₹649,686 |
+| Experience: Missing | 1,024 | 57.60% | ₹649,686 |
+
+> **Subgroup insight**: While global marginal coverage meets the 90% target, coverage drops to 57.6% on records with missing experience. Conformal prediction guarantees marginal validity across the full distribution, but conditional subgroup coverage varies without dedicated subgroup calibration.
+
+### Permutation feature importance
+
+Held-out permutation importance on the champion model highlights the primary salary drivers:
 
 ```text
-inspect the data
-      ↓
-make deterministic cleanup decisions
-      ↓
-split before learned preprocessing
-      ↓
-compare models with CV
-      ↓
-load the exported result
+Experience_Years    ██████████████████████████████  (0.612)
+Job_Title           ██████████████                  (0.284)
+Education_Level     █████                           (0.098)
+Location            ███                             (0.061)
+skill_count         █                               (0.021)
+Individual Skills   ▌                               (0.001 - 0.008)
 ```
 
-## 🧩 MLOps and serving
+* **Dominant predictors**: Experience and role account for the majority of explained variance.
+* **Skill contributions**: Individual skill flags provide minor refinements once core background features are established.
+* **Counterfactual simulation**: Streamlit evaluates instant salary deltas for unselected skills (e.g. adding `AWS` -> +0.45 LPA), framed strictly as model sensitivity rather than causal career guarantees.
 
-The MLOps layer is intentionally small but complete for this project:
+---
 
-```text
-raw CSV validation
-    ↓
-training and CV
-    ↓
-MLflow candidate
-    ↓
-validation-only promotion gate
-    ├── rejected → existing champion remains
-    └── promoted → @champion
-    ↓
-shared inference module
-    ├── Streamlit UI
-    └── FastAPI API
-              ↓
-          Docker runtime
+## MLOps lifecycle and dual serving architecture
+
+The project connects offline training to live serving through a local MLflow registry and a shared inference contract.
+
+### MLflow registry and champion promotion
+
+Training logs runs to a local SQLite store (`sqlite:///mlflow.db`). To prevent regressions, candidates must pass an automated validation gate on a separate 8,619-row validation split:
+* **Promotion thresholds**: Candidate MAE must not worsen by more than 2% ($\le 1.02 \times \text{champion MAE}$) and R² must not drop by more than 0.005.
+* **Alias management**: Passing models receive the `@champion` alias; rejected models are tagged as rejected while the current champion remains active.
+* **Lineage logging**: Records Git commit SHA, raw data SHA-256, config SHA-256, row counts, and `data_validation.json`.
+
+### Shared inference engine (`src/inference.py`)
+
+A single module handles inference for both user interfaces, preventing training-serving skew:
+* Loads `models:/tech-salary-advisor@champion` from MLflow, with local artifact fallbacks (`streamlit/models/`) for containerized runs.
+* Normalizes input strings, handles categorical synonyms, and computes 90% conformal uncertainty intervals.
+
+### Dual serving interfaces
+
+```json
+// POST /predict Request to FastAPI (api/main.py)
+{
+  "job_title": "Data Scientist",
+  "experience_years": 3.0,
+  "education": "Bachelor's",
+  "location": "Bangalore",
+  "skills": ["Python", "SQL"]
+}
+
+// Response (200 OK) with 90% Conformal Interval
+{
+  "salary_inr": 1284500,
+  "salary_lpa": 12.85,
+  "interval_level": 0.9,
+  "interval_lower_inr": 959657,
+  "interval_upper_inr": 1609343,
+  "interval_lower_lpa": 9.60,
+  "interval_upper_lpa": 16.09
+}
 ```
 
-The goal was not to add infrastructure for its own sake. Each layer solves a practical problem in the model’s path from experiment to use:
+* **Streamlit UI (`streamlit/app.py`)**: Interactive web dashboard featuring salary metrics, experience curves, and skill counterfactuals.
+* **FastAPI Microservice (`api/main.py`)**: High-throughput REST API with Pydantic schema validation.
+* **Docker and CI smoke testing**: Packages the API into a `python:3.11-slim` container. GitHub Actions CI spins up the container and runs smoke tests against `/health` and `/predict` on every pull request.
 
-- MLflow uses a local SQLite backend for model-comparison runs, candidate models, validation metrics, aliases, and artifacts.
-- Raw-data validation checks required columns, numeric ranges, missingness, and duplicate rates before cleanup. Structural errors stop training; quality warnings are retained in the final run.
-- The candidate is compared with `@champion` on a separate validation split: MAE may worsen by at most 2%, and R² may fall by at most 0.005. The final test split is reporting-only.
-- A separate calibration split supplies split-conformal residuals for a documented 90% interval; its segment coverage and width are stored in `prediction_interval.json` and model metadata.
-- A promoted candidate receives `@challenger` and `@champion`; a rejected candidate leaves the existing champion and local fallback untouched.
-- Inference loads `models:/tech-salary-advisor@champion` when MLflow and the registry are available, then falls back to `streamlit/models/` for the Docker/local artifact path.
-- The final MLflow run stores machine-readable `data_validation.json`, `lineage.json`, `promotion.json`, and model metadata artifacts.
-- `src/inference.py` is the single path for validation, feature-row construction, column ordering, and prediction.
-- Streamlit uses the shared inference module for the interactive app.
-- FastAPI exposes `/health` and `/predict`.
-- Docker packages the API with pinned runtime dependencies.
-- Ruff, pre-commit, pytest, and GitHub Actions automate quality checks, including a Docker startup and prediction smoke test.
+---
 
-## 🚀 Quickstart
+## Quickstart
 
-### Run the complete local path
+### 1. Environment setup and testing
 
 ```bash
+# Clone and install dependencies
+git clone https://github.com/goyashek/Tech-Salary-Advisor.git
+cd Tech-Salary-Advisor
 pip install -r requirements-dev.txt
+
+# Run test suite
 pytest -q
+```
+
+### 2. Model training and registry tracking
+
+The exported model ships in `streamlit/models/`, so retraining is optional. To run the full training pipeline, Optuna search, validation promotion, and MLflow logging:
+
+```bash
+# Run full training (or add --fast for a quick smoke run)
 python -m src.train
+
+# Open MLflow registry UI
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
+### 3. Launching serving interfaces
+
+```bash
+# Launch interactive Streamlit dashboard
 streamlit run streamlit/app.py
+
+# Launch FastAPI REST microservice
+pip install -r requirements-api.txt
+uvicorn api.main:app --reload
+
+# Query health and predict endpoints
+curl http://localhost:8000/health
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"job_title":"Data Scientist","experience_years":3,"education":"Bachelor'\''s","location":"Bangalore","skills":["Python","SQL"]}'
+
+# Build and run Docker container
 docker build -t tech-salary-advisor .
 docker run --rm -p 8000:8000 tech-salary-advisor
 ```
 
-To inspect the registry in another terminal:
+---
 
-```bash
-mlflow ui --backend-store-uri sqlite:///mlflow.db
-```
-
-The full training run performs model comparison, Optuna tuning, stacking, validation-gated registry promotion, final evaluation, and local fallback export. For a shorter smoke run, use:
-
-```bash
-python -m src.train --fast
-```
-
-The exported model already ships in `streamlit/models/`, so retraining is optional for trying the app.
-
-### Run the optional Keras ANN benchmark on Apple Silicon
-
-```bash
-conda create --prefix ./.venv python=3.12 pip -y
-.venv/bin/pip install -r requirements-keras-macos.txt
-make keras-benchmark
-```
-
-TensorFlow uses Metal automatically when the GPU is available. The recorded
-three-fold run used the same 30,000-row training-only subset and did not inspect
-promotion-validation or final-test labels.
-
-### Run the FastAPI service
-
-```bash
-pip install -r requirements-api.txt
-uvicorn api.main:app --reload
-```
-
-Check the service and request a prediction:
-
-```bash
-curl http://localhost:8000/health
-curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -d "{\"job_title\":\"Data Scientist\",\"experience_years\":3,\"education\":\"Bachelor's\",\"location\":\"Bangalore\",\"skills\":[\"Python\",\"SQL\"]}"
-```
-
-The response contains the point estimate, interval level, lower/upper INR bounds, and corresponding LPA values. The demo API is unauthenticated; do not expose it to sensitive data without adding authentication.
-
-## 📁 Repository anatomy
-
-The repository is split by responsibility:
-
-- `notebooks/` explains the investigation.
-- `src/` contains reusable ML logic.
-- `tests/` protects the important data and inference paths.
-- `streamlit/` contains the user-facing application and exported model artifacts.
-- `api/` exposes the model over HTTP.
-- `Dockerfile` and `.github/` cover deployment and automation.
+## Repository structure
 
 ```text
 Tech-Salary-Advisor/
-├── config.yaml                    # data, features, split, tuning, and output settings
+├── config.yaml                    # Data paths, split sizes, tuning, and registry config
 ├── data/
-│   └── salary_dataset_dirty.csv   # raw public dataset
+│   └── salary_dataset_dirty.csv   # Raw public Kaggle dataset
 ├── src/
-│   ├── data.py                    # deterministic cleanup and missing indicators
-│   ├── features.py                # skill flags and skill_count
-│   ├── pipeline.py                # preprocessing and target transformation
-│   ├── evaluate.py                # regression and interval metrics
-│   ├── model_registry.py           # MLflow aliases and promotion gate
-│   ├── validate_data.py            # raw-data gate and training lineage
-│   ├── inference.py               # shared validation and prediction path
-│   ├── keras_benchmark.py          # optional regularized Keras ANN comparison
-│   └── train.py                   # baselines, tuning, stacking, MLflow, and export
-├── api/main.py                    # FastAPI service
-├── streamlit/app.py               # interactive application
-├── streamlit/models/              # exported model and metadata
-├── notebooks/                     # EDA and modeling walkthroughs
-├── tests/                         # data, model, inference, and API tests
-├── Dockerfile                     # API runtime image
-├── .github/workflows/ci.yml       # Ruff, pytest, Docker build, and runtime smoke CI
-├── .pre-commit-config.yaml        # local quality hooks
-├── requirements-api.txt           # pinned API runtime dependencies
-├── requirements-dev.txt           # development and test dependencies
-├── requirements-keras-macos.txt   # optional Apple Silicon Keras environment
-└── README.md
+│   ├── validate_data.py           # Pre-training schema and range validation gate
+│   ├── data.py                    # Deterministic text cleaning and missing indicators
+│   ├── features.py                # Binary skill flag parsing and skill_count
+│   ├── pipeline.py                # ColumnTransformer and TransformedTargetRegressor
+│   ├── evaluate.py                # Regression metrics and split-conformal calibration
+│   ├── model_registry.py          # MLflow champion-challenger promotion gate
+│   ├── inference.py               # Shared prediction and interval calculation engine
+│   ├── keras_benchmark.py         # Regularized Keras ANN benchmark (Metal GPU)
+│   └── train.py                   # End-to-end training, tuning, and export pipeline
+├── api/
+│   └── main.py                    # Typed FastAPI REST API endpoints
+├── streamlit/
+│   ├── app.py                     # Streamlit web dashboard
+│   └── models/                    # Exported champion model and metadata fallbacks
+├── notebooks/
+│   ├── EDA.ipynb                  # Exploratory analysis and distributions
+│   └── Salary_Prediction.ipynb    # Modeling walkthrough and pipeline verification
+├── tests/                         # Data validation, pipeline, inference, and API tests
+├── Dockerfile                     # Container configuration for FastAPI
+├── Makefile                       # Convenience targets for testing, training, and benchmarks
+└── .github/workflows/ci.yml       # Ruff, pytest, Docker build, and container smoke CI
 ```
 
-## 🛠️ Tools and acknowledgements
+---
 
-The project uses standard tools at each stage:
+## Limitations and responsible boundaries
 
-- pandas and NumPy for data work;
-- scikit-learn for preprocessing, evaluation, and model composition;
-- XGBoost and CatBoost for nonlinear regression;
-- Keras/TensorFlow for the optional regularized ANN benchmark;
-- Optuna for tuning;
-- MLflow for experiment tracking;
-- Streamlit and FastAPI for serving;
-- Docker and GitHub Actions for reproducibility and automation.
+* **Educational scope**: Estimates reflect patterns in one public Kaggle dataset. This is an educational regression system, not an authoritative industry compensation benchmark.
+* **Unmodelled factors**: Compensation in practice depends on company tier, individual negotiation, equity grants, bonuses, performance history, and market cycles, none of which are recorded in the dataset.
+* **Non-causal skill insights**: Counterfactual skill comparisons reflect descriptive model sensitivity, not a causal guarantee that acquiring a skill will increase salary.
+* **Demo security**: The demo API is unauthenticated and intended for local exploration.
 
-This project follows a learning-first approach: use established libraries where they fit, keep reusable logic in `src/`, and add infrastructure only when it improves reproducibility or serving. The modeling techniques follow concepts from CampusX’s *100 Days of Machine Learning* curriculum.
+---
 
-## ⚖️ Limitations
+## Acknowledgements
 
-This is an educational salary estimation project, not an authoritative market-rate system. The data comes from one public dataset and one seeded training run. The model does not account for company, industry, seniority band, negotiation, equity, employment gaps, or changing market conditions.
+Modeling concepts and pipeline patterns follow foundations from CampusX's *100 Days of Machine Learning* curriculum.
 
-The skill-comparison view shows model behavior, not causal salary effects. The API is unauthenticated and should not be exposed to sensitive data without an authentication layer.
-
-Predictions should not be used as the sole basis for compensation, hiring, or career decisions.
+---
 
 ## License
 
-The original source code is released under the [MIT License](LICENSE). The dataset remains subject to its own terms on Kaggle.
+This project is licensed under the [MIT License](LICENSE). The dataset remains subject to its original terms on Kaggle.
+

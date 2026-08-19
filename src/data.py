@@ -21,7 +21,7 @@ def load_raw(path):
     return pd.read_csv(path)
 
 
-def clean_job_title(title):
+def clean_job_title(title, strict=False):
     if pd.isna(title):
         return title
     title = str(title).strip().lower()
@@ -51,10 +51,10 @@ def clean_job_title(title):
         return "QA Engineer"
     if "product" in title or "pm" in title:
         return "Product Manager"
-    return "Software Engineer"
+    return None if strict else "Software Engineer"
 
 
-def clean_location(city):
+def clean_location(city, strict=False):
     if pd.isna(city):
         return city
     city = str(city).strip().lower()
@@ -69,18 +69,20 @@ def clean_location(city):
     ]:
         if key in city:
             return label
-    return "Bangalore"
+    return None if strict else "Bangalore"
 
 
-def clean_education(edu):
+def clean_education(edu, strict=False):
     if pd.isna(edu):
         return edu
     edu = str(edu).strip().lower()
+    if any(k in edu for k in ["bachelor", "btech", "b.tech", "b.e"]):
+        return "Bachelor's"
     if any(k in edu for k in ["master", "mtech", "m.tech", "ms", "m.s."]):
         return "Master's"
     if "phd" in edu or "doctor" in edu:
         return "PhD"
-    return "Bachelor's"
+    return None if strict else "Bachelor's"
 
 
 def clean(df, target="Salary_INR"):
