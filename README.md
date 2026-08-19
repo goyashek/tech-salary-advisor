@@ -70,12 +70,6 @@ flowchart LR
     D --> E["Shared Inference\n(+ 90% Interval)"]
     E --> G3{"Gate 3:\nDocker CI Smoke"}
     G3 -->|PASS| F["Live Serving\n(Streamlit & FastAPI)"]
-
-    style G1 fill:#fee2e2,stroke:#ef4444,stroke-width:1.5px
-    style G2 fill:#fef3c7,stroke:#f59e0b,stroke-width:1.5px
-    style G3 fill:#e0e7ff,stroke:#6366f1,stroke-width:1.5px
-    style D fill:#dcfce7,stroke:#22c55e,stroke-width:1.5px
-    style F fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px
 ```
 
 ### Automated quality gates
