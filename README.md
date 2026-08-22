@@ -5,6 +5,7 @@
 ### Modular salary regression engine with conformal prediction intervals and MLflow lifecycle tracking
 
 [![Streamlit App](https://img.shields.io/badge/Live_Demo-Streamlit_App-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://tech-salary-advisor.streamlit.app/)
+[![FastAPI API](https://img.shields.io/badge/Live_API-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://tech-salary-advisor.onrender.com/docs)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)](https://scikit-learn.org/)
